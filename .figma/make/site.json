@@ -1,0 +1,10 @@
+{
+  "description": "Offers personalized fitness plans and resources tailored to users seeking effective workout guidance and wellness tracking in a user-friendly platform.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
