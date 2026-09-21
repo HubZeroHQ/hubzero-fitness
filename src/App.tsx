@@ -1,38 +1,43 @@
 import { useState } from 'react'
-import LoginPage from './pages/LoginPage'
-import WorkoutPage from './pages/WorkoutPage'
-import MyProgressPage from './pages/MyProgressPage'
-import TeamProgressPage from './pages/TeamProgressPage'
-import ProfilePage from './pages/ProfilePage'
-import CoachDashboard from './pages/CoachDashboard'
-import AdminDashboard from './pages/AdminDashboard'
-import Nav from './components/Nav'
+import { AuthProvider, useAuth } from './lib/auth'
+import Nav, { type Page } from './components/Nav'
+import Login from './pages/Login'
+import ChangePassword from './pages/ChangePassword'
+import Today from './pages/Today'
+import Progress from './pages/Progress'
+import Team from './pages/Team'
+import Me from './pages/Me'
 
-type Page = 'workout' | 'progress' | 'team' | 'profile' | 'coach' | 'admin'
+function Shell() {
+  const { profile, loading } = useAuth()
+  const [page, setPage] = useState<Page>('today')
 
-export default function App() {
-  const [loggedIn, setLoggedIn] = useState(false)
-  const [page, setPage] = useState<Page>('workout')
-
-  if (!loggedIn) {
-    return <LoginPage onLogin={() => setLoggedIn(true)} />
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ color: '#888899' }}>
+        Loading…
+      </div>
+    )
   }
+  if (!profile) return <Login />
+  if (profile.must_change_password) return <ChangePassword />
 
-  const pageContent = {
-    workout: <WorkoutPage />,
-    progress: <MyProgressPage />,
-    team: <TeamProgressPage />,
-    profile: <ProfilePage />,
-    coach: <CoachDashboard />,
-    admin: <AdminDashboard />,
-  }[page]
+  const content = { today: <Today />, progress: <Progress />, team: <Team />, me: <Me /> }[page]
 
   return (
     <div className="min-h-screen" style={{ background: '#0a0a0c' }}>
-      <Nav current={page} onNavigate={setPage} onLogout={() => setLoggedIn(false)} />
-      <div className="md:pl-56">
-        {pageContent}
-      </div>
+      <Nav current={page} onNavigate={setPage} />
+      <main className="md:pl-56 pb-24 md:pb-8">
+        <div className="max-w-5xl mx-auto px-4 md:px-8 py-6">{content}</div>
+      </main>
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Shell />
+    </AuthProvider>
   )
 }

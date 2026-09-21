@@ -1,15 +1,22 @@
 {
-  "name": "figma-make-app",
+  "name": "hubzero-fitness",
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "vite",
+    "dev:server": "node --watch server/index.js",
     "build": "vite build",
-    "preview": "vite preview",
+    "start": "node server/index.js",
+    "admin": "node server/admin.js",
+    "test": "node --test server/app.test.js",
     "format": "oxfmt"
   },
   "dependencies": {
+    "express": "^5.2.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^3.10.1"

@@ -1,0 +1,226 @@
+import express from 'express'
+import { createHash, randomBytes } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { DEFAULT_PASSWORD, hashPassword, tx, verifyPassword } from './db.js'
+
+const COOKIE = 'hz_session'
+const SESSION_DAYS = 30
+const MAX_FAILS = 5
+const LOCK_MS = 15 * 60 * 1000
+
+const sha = (s) => createHash('sha256').update(s).digest('hex')
+const bool = (v) => (v ? 1 : 0)
+const numOrNull = (v) => {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+
+const publicUser = (u) => ({
+  id: u.id,
+  full_name: u.full_name,
+  role: u.role,
+  must_change_password: !!u.must_change_password,
+  height_cm: u.height_cm,
+  sex: u.sex,
+  birth_date: u.birth_date,
+  goal_weight_kg: u.goal_weight_kg,
+})
+
+const logOut = (l, sets) => ({ ...l, completed: !!l.completed, set_logs: sets.map((s) => ({ ...s, done: !!s.done })) })
+
+export function createApp(db, { secureCookie = false, trustProxy = false, staticDir } = {}) {
+  const app = express()
+  app.disable('x-powered-by')
+  if (trustProxy) app.set('trust proxy', 1) // behind nginx/Caddy: use the real client IP for login rate limiting
+  app.use(express.json({ limit: '200kb' }))
+
+  const fails = new Map() // "ip|email" -> { count, until }
+
+  // ---- auth helpers -------------------------------------------------------
+  const cookieOpts = () => `Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secureCookie ? '; Secure' : ''}`
+
+  function readToken(req) {
+    const raw = req.headers.cookie ?? ''
+    const part = raw.split(';').map((s) => s.trim()).find((s) => s.startsWith(`${COOKIE}=`))
+    return part ? part.slice(COOKIE.length + 1) : null
+  }
+
+  function startSession(res, userId) {
+    const token = randomBytes(32).toString('hex')
+    db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(sha(token), userId, Date.now() + SESSION_DAYS * 86400_000)
+    res.setHeader('Set-Cookie', `${COOKIE}=${token}; ${cookieOpts()}`)
+  }
+
+  function requireAuth(req, res, next) {
+    const token = readToken(req)
+    if (token) {
+      const row = db
+        .prepare('SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?')
+        .get(sha(token), Date.now())
+      if (row) {
+        req.user = row
+        return next()
+      }
+    }
+    res.status(401).json({ error: 'Not signed in' })
+  }
+
+  // Everything except login needs a session; the forced password change blocks all data routes.
+  const requireReady = (req, res, next) =>
+    req.user.must_change_password ? res.status(403).json({ error: 'Change your password first' }) : next()
+
+  // ---- auth routes --------------------------------------------------------
+  app.post('/api/login', (req, res) => {
+    const email = String(req.body?.email ?? '').trim().toLowerCase()
+    const password = String(req.body?.password ?? '')
+    const key = `${req.ip}|${email}`
+    const f = fails.get(key)
+    if (f && f.count >= MAX_FAILS && f.until > Date.now()) {
+      return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' })
+    }
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email)
+    if (!user || !verifyPassword(password, user.password_hash)) {
+      fails.set(key, { count: (f && f.until > Date.now() ? f.count : 0) + 1, until: Date.now() + LOCK_MS })
+      return res.status(401).json({ error: 'Wrong email or password.' })
+    }
+    fails.delete(key)
+    startSession(res, user.id)
+    res.json(publicUser(user))
+  })
+
+  app.post('/api/logout', (req, res) => {
+    const token = readToken(req)
+    if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha(token))
+    res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; Max-Age=0`)
+    res.json({ ok: true })
+  })
+
+  app.get('/api/me', requireAuth, (req, res) => res.json(publicUser(req.user)))
+
+  app.post('/api/change-password', requireAuth, (req, res) => {
+    const current = String(req.body?.current ?? '')
+    const next = String(req.body?.password ?? '')
+    if (!verifyPassword(current, req.user.password_hash)) return res.status(400).json({ error: 'Current password is wrong.' })
+    if (next.length < 8) return res.status(400).json({ error: 'Use at least 8 characters.' })
+    if (next.toLowerCase().includes(DEFAULT_PASSWORD)) return res.status(400).json({ error: 'Choose something different from the default password.' })
+    tx(db, () => {
+      db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPassword(next), req.user.id)
+      // Sign out every other device; keep the current one.
+      db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').run(req.user.id, sha(readToken(req)))
+    })
+    res.json(publicUser({ ...req.user, must_change_password: 0 }))
+  })
+
+  // ---- data routes --------------------------------------------------------
+  const data = express.Router()
+  data.use(requireAuth, requireReady)
+
+  data.patch('/me', (req, res) => {
+    const b = req.body ?? {}
+    const sex = b.sex === 'male' || b.sex === 'female' ? b.sex : null
+    const birth = b.birth_date && isDate(b.birth_date) ? b.birth_date : null
+    db.prepare('UPDATE users SET height_cm = ?, sex = ?, birth_date = ?, goal_weight_kg = ? WHERE id = ?').run(
+      numOrNull(b.height_cm),
+      sex,
+      birth,
+      numOrNull(b.goal_weight_kg),
+      req.user.id,
+    )
+    res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)))
+  })
+
+  data.get('/profiles', (_req, res) => {
+    res.json(db.prepare('SELECT * FROM users ORDER BY full_name').all().map(publicUser))
+  })
+
+  // All workout logs (with sets), oldest first. ?userId= limits to one person; everyone can read everyone (team of 5).
+  data.get('/logs', (req, res) => {
+    const userId = numOrNull(req.query.userId)
+    const logs = userId
+      ? db.prepare('SELECT * FROM workout_logs WHERE user_id = ? ORDER BY log_date').all(userId)
+      : db.prepare('SELECT * FROM workout_logs ORDER BY log_date').all()
+    const sets = userId
+      ? db.prepare('SELECT s.* FROM set_logs s JOIN workout_logs w ON w.id = s.workout_log_id WHERE w.user_id = ?').all(userId)
+      : db.prepare('SELECT * FROM set_logs').all()
+    const byLog = new Map()
+    for (const s of sets) {
+      if (!byLog.has(s.workout_log_id)) byLog.set(s.workout_log_id, [])
+      byLog.get(s.workout_log_id).push(s)
+    }
+    res.json(logs.map((l) => logOut(l, byLog.get(l.id) ?? [])))
+  })
+
+  // Save (create or replace) the signed-in user's log for one date, including all of its sets.
+  data.put('/logs/:date', (req, res) => {
+    const date = req.params.date
+    const b = req.body ?? {}
+    if (!isDate(date)) return res.status(400).json({ error: 'Bad date' })
+    const day = Number(b.day_number)
+    if (!Number.isInteger(day) || day < 1 || day > 7) return res.status(400).json({ error: 'Bad day' })
+    const sets = Array.isArray(b.sets) ? b.sets.slice(0, 200) : []
+
+    const saved = tx(db, () => {
+      db.prepare(
+        `INSERT INTO workout_logs (user_id, log_date, day_number, completed, duration_min, cardio_min, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (user_id, log_date) DO UPDATE SET
+           day_number = excluded.day_number, completed = excluded.completed,
+           duration_min = excluded.duration_min, cardio_min = excluded.cardio_min, notes = excluded.notes`,
+      ).run(req.user.id, date, day, bool(b.completed), numOrNull(b.duration_min), numOrNull(b.cardio_min), b.notes ? String(b.notes).slice(0, 500) : null)
+      const log = db.prepare('SELECT * FROM workout_logs WHERE user_id = ? AND log_date = ?').get(req.user.id, date)
+      db.prepare('DELETE FROM set_logs WHERE workout_log_id = ?').run(log.id)
+      const ins = db.prepare(
+        'INSERT OR REPLACE INTO set_logs (workout_log_id, exercise_key, exercise_name, set_number, weight_kg, reps, done) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      for (const s of sets) {
+        if (!s?.exercise_key || !Number.isInteger(s.set_number)) continue
+        ins.run(log.id, String(s.exercise_key).slice(0, 80), String(s.exercise_name ?? s.exercise_key).slice(0, 120), s.set_number, numOrNull(s.weight_kg), numOrNull(s.reps), bool(s.done))
+      }
+      return { log, sets: db.prepare('SELECT * FROM set_logs WHERE workout_log_id = ?').all(log.id) }
+    })
+    res.json(logOut(saved.log, saved.sets))
+  })
+
+  data.get('/metrics', (req, res) => {
+    const userId = numOrNull(req.query.userId)
+    res.json(
+      userId
+        ? db.prepare('SELECT * FROM body_metrics WHERE user_id = ? ORDER BY measured_on').all(userId)
+        : db.prepare('SELECT * FROM body_metrics ORDER BY measured_on').all(),
+    )
+  })
+
+  data.put('/metrics', (req, res) => {
+    const b = req.body ?? {}
+    const weight = numOrNull(b.weight_kg)
+    if (!isDate(b.measured_on) || !weight || weight <= 0 || weight > 400) return res.status(400).json({ error: 'Need a date and a valid weight' })
+    db.prepare(
+      `INSERT INTO body_metrics (user_id, measured_on, weight_kg, body_fat_pct, waist_cm) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, measured_on) DO UPDATE SET weight_kg = excluded.weight_kg, body_fat_pct = excluded.body_fat_pct, waist_cm = excluded.waist_cm`,
+    ).run(req.user.id, b.measured_on, weight, numOrNull(b.body_fat_pct), numOrNull(b.waist_cm))
+    res.json({ ok: true })
+  })
+
+  data.delete('/metrics/:id', (req, res) => {
+    db.prepare('DELETE FROM body_metrics WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id)
+    res.json({ ok: true })
+  })
+
+  app.use('/api', data)
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }))
+
+  // ---- built frontend (production) ----------------------------------------
+  if (staticDir && existsSync(resolve(staticDir, 'index.html'))) {
+    app.use(express.static(staticDir))
+    app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(resolve(staticDir, 'index.html')))
+  }
+
+  app.use((err, _req, res, _next) => {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  })
+  return app
+}

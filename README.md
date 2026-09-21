@@ -1,0 +1,171 @@
+# Hub Zero Fitness (fitness.hubzero.in)
+
+A private workout tracker for the five members of the Hub Zero fitness team. It follows the team's 6-day
+Push / Pull / Legs+Core timetable and saves progress after every workout.
+
+- **Today's workout**: sets, weight and reps with tick boxes, autosaved; shows your last numbers per exercise.
+- **My progress**: streak, weekly count, volume, personal records, charts, history.
+- **Team**: ranking of all members. Everyone can see everyone's numbers.
+- **Profile & BMI**: BMI (Asia-Pacific and WHO), healthy range, calories, body-fat estimate, weigh-in log.
+
+Stack: React 19 + Vite + Tailwind 4 (frontend), Node + Express + SQLite (backend, one process, one database file).
+There is **no external service, cloud account or paid dependency**.
+
+## Requirements
+
+- **Node.js 22.13 or newer** (uses Node's built-in `node:sqlite`; tested on Node 24)
+- **pnpm** (`npm i -g pnpm`). Plain `npm` also works: replace `pnpm` with `npm run` below.
+
+## Run it locally (development)
+
+```bash
+pnpm install
+pnpm dev:server     # API + database on http://localhost:3001 (terminal 1)
+pnpm dev            # website with hot reload on http://localhost:8443 (terminal 2)
+```
+
+Open http://localhost:8443. The first time the server starts it creates `data/fitness.db` and the five accounts.
+
+## Run it for real (production, single process)
+
+```bash
+pnpm install
+pnpm build          # builds the website into dist/
+pnpm start          # serves the website AND the API on http://localhost:3001
+```
+
+`pnpm start` serves everything from one port. Put a reverse proxy with HTTPS in front of it and use these
+environment variables:
+
+| Variable        | Default            | Meaning                                                                     |
+| --------------- | ------------------ | --------------------------------------------------------------------------- |
+| `PORT_API`      | `3001`             | Port to listen on                                                           |
+| `DB_PATH`       | `./data/fitness.db`| Where the SQLite database file lives                                        |
+| `COOKIE_SECURE` | `false`            | Set `true` once the site is served over HTTPS (marks the login cookie Secure)|
+| `TRUST_PROXY`   | `false`            | Set `true` behind nginx/Caddy so login rate-limiting sees real client IPs   |
+| `STATIC_DIR`    | `./dist`           | Folder with the built website                                               |
+
+Example (Linux):
+
+```bash
+COOKIE_SECURE=true TRUST_PROXY=true PORT_API=3001 DB_PATH=/var/lib/hubzero-fitness/fitness.db pnpm start
+```
+
+### Keep it running (systemd example)
+
+`/etc/systemd/system/hubzero-fitness.service`:
+
+```ini
+[Unit]
+Description=Hub Zero Fitness
+After=network.target
+
+[Service]
+WorkingDirectory=/srv/DesignFitnessWebsite
+Environment=COOKIE_SECURE=true TRUST_PROXY=true PORT_API=3001 DB_PATH=/var/lib/hubzero-fitness/fitness.db
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+User=hubzero
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then `sudo systemctl enable --now hubzero-fitness`. On Windows you can use `pm2` or NSSM instead.
+
+### HTTPS with nginx (fitness.hubzero.in)
+
+```nginx
+server {
+  server_name fitness.hubzero.in;
+  location / {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+  # add TLS with certbot: sudo certbot --nginx -d fitness.hubzero.in
+}
+```
+
+## Accounts and passwords
+
+The first start creates these accounts, all with the password **`hubzero`**. Each person is forced to choose a
+new password (min 8 characters, must not contain "hubzero") at first login before they can use the site.
+
+| Name                  | Email                        | Role      |
+| --------------------- | ---------------------------- | --------- |
+| Syed Mohammed Sultan  | ssultanmaliki47@gmail.com    | coach     |
+| Rifaque Ahmed Akrami  | rifaque.rs@gmail.com         | moderator |
+| Raif Karani           | karaniraif@gmail.com         | member    |
+| Mohammed Iyad         | mohdiyad26@gmail.com         | member    |
+| Salsabeel Kobattey    | kobatteysalsabeel@gmail.com  | member    |
+
+The roster is defined in `server/db.js` (`ROSTER`). It is only used when the database is empty.
+
+> Log in and change the default passwords **immediately** after deploying; until then anyone who knows
+> `hubzero` and an email address can get in.
+
+### Admin commands (there is no "forgot password" email)
+
+Run these on the server, in the project folder:
+
+```bash
+pnpm admin list                                             # show everyone
+pnpm admin reset-password someone@example.com               # back to "hubzero", forces a change
+pnpm admin add-user new@example.com "Full Name" member      # role: coach | moderator | member
+pnpm admin set-role someone@example.com coach
+```
+
+Roles are currently only labels (coach / moderator / member have the same permissions in the app).
+
+## Data and backups
+
+Everything is one SQLite file (`data/fitness.db`, plus `-wal`/`-shm` side files while running). To back it up
+safely while the server is running:
+
+```bash
+sqlite3 data/fitness.db ".backup 'backup-$(date +%F).db'"
+```
+
+or stop the server and copy the file. To restore, stop the server and put the file back. `data/` is git-ignored.
+
+Tables: `users`, `sessions`, `workout_logs` (one per person per day), `set_logs` (one per set),
+`body_metrics` (weigh-ins). The schema is at the top of `server/db.js`.
+
+### Using MySQL instead
+
+SQLite is recommended: 5 users need nothing more, it needs no separate database server, and backup is one file.
+If MySQL is required, the SQL is confined to `server/db.js`, `server/app.js` and `server/admin.js` (about 300
+lines): swap `node:sqlite` for the `mysql2` package, change `INTEGER PRIMARY KEY AUTOINCREMENT` to
+`AUTO_INCREMENT`, replace `ON CONFLICT ... DO UPDATE` with `ON DUPLICATE KEY UPDATE`, and make the handlers
+`async`. The frontend does not change.
+
+## Changing the timetable
+
+Exercises, sets and rep ranges are in `src/lib/program.ts` (from the Hub Zero timetable image). Edit and rebuild.
+Day mapping: Monday is Day 1 through Saturday Day 6, Sunday is Day 7 (rest); members can switch day on the page
+(`defaultDayFor` in the same file).
+
+## Project layout
+
+```
+server/        Express API + SQLite (db.js schema/seed, app.js routes, admin.js CLI, app.test.js tests)
+src/lib/       api client, auth context, timetable, BMI/health maths, stats
+src/pages/     Login, ChangePassword, Today, Progress, Team, Me
+src/components Nav and shared UI
+data/          SQLite database (created on first run, not in git)
+```
+
+## Tests
+
+```bash
+pnpm test       # backend: login, forced password change, workout saving, privacy of writes, rate limit
+```
+
+## Security notes
+
+- Passwords are hashed with scrypt; sessions are random tokens stored hashed, in an HttpOnly cookie (30 days).
+- 5 wrong passwords for the same email+IP locks login for 15 minutes.
+- Any signed-in member can read every member's logs and weigh-ins (by design); each can only write their own.
+- Use HTTPS in production and set `COOKIE_SECURE=true`.

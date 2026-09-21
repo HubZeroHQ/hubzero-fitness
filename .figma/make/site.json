@@ -1,10 +1,11 @@
 {
-  "description": "Offers personalized fitness plans and resources tailored to users seeking effective workout guidance and wellness tracking in a user-friendly platform.",
+  "description": "Workout tracker and progress log for the Hub Zero fitness team.",
   "robots": {
     "index": false
   },
   "accessibility": {
     "addBypassLinks": false,
     "ignoreReducedMotion": false
-  }
+  },
+  "title": "Hub Zero Fitness"
 }
