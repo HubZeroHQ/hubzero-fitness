@@ -21,9 +21,11 @@ There is **no external service, cloud account or paid dependency**.
 
 ```bash
 pnpm install
-pnpm dev:server     # API + database on http://localhost:3001 (terminal 1)
-pnpm dev            # website with hot reload on http://localhost:8443 (terminal 2)
+pnpm dev:all         # starts the API (port 3001) and the website (port 8443) together
 ```
+
+Or run them separately in two terminals: `pnpm dev:server` (API + database) and `pnpm dev` (website with hot reload).
+The website alone cannot sign anyone in: without the API you will see `http proxy error ... ECONNREFUSED`.
 
 Open http://localhost:8443. The first time the server starts it creates `data/fitness.db` and the five accounts.
 
