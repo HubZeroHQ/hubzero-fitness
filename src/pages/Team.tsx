@@ -2,13 +2,15 @@ import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useLogs, useProfiles } from '../lib/data'
 import { currentStreak, fmtDate, fmtKg, isoDate, addDays, personalRecords, volumeOf } from '../lib/stats'
-import { TYPE_COLOR, dayByNumber } from '../lib/program'
+import { TYPE_COLOR } from '../lib/program'
+import { useProgram } from '../lib/programContext'
 import { Card, Heading, chartColors, font, inputStyle, tooltipStyle } from '../components/ui'
 import Progress from './Progress'
 
 const roleLabel = { coach: 'Coach', moderator: 'Moderator', member: 'Member' } as const
 
 export default function Team() {
+  const { dayByNumber } = useProgram()
   const profiles = useProfiles()
   const logs = useLogs()
   const [exercise, setExercise] = useState('')

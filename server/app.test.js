@@ -93,3 +93,82 @@ test('body metrics are per user and can be deleted only by their owner', async (
   assert.equal((await t.call('GET', '/api/metrics')).body.length, 1, "someone else's delete is ignored")
   t.close()
 })
+
+async function loginAs(t, email, newPassword) {
+  t.clearCookie()
+  await t.call('POST', '/api/login', { email, password: 'hubzero' })
+  await t.call('POST', '/api/change-password', { current: 'hubzero', password: newPassword })
+}
+
+test('everyone reads the seeded program; only the coach can edit it', async () => {
+  const t = await boot()
+  await loginAs(t, 'karaniraif@gmail.com', 'raif-new-pass')
+  const prog = await t.call('GET', '/api/program')
+  assert.equal(prog.status, 200)
+  assert.equal(prog.body.length, 7)
+  assert.equal(prog.body[0].exercises[0].name, 'Bench Press')
+  assert.equal(prog.body[5].exercises.at(-1).timed, true)
+
+  const ex = prog.body[0].exercises[0]
+  assert.equal((await t.call('PATCH', `/api/program/exercises/${ex.id}`, { sets: 5 })).status, 403)
+  assert.equal((await t.call('POST', '/api/program/days/1/exercises', { name: 'Dips', sets: 3, repsMin: 8, repsMax: 12 })).status, 403)
+  assert.equal((await t.call('DELETE', `/api/program/exercises/${ex.id}`)).status, 403)
+  assert.equal((await t.call('PUT', '/api/program/days/1', { type: 'push', title: 'X' })).status, 403)
+
+  await loginAs(t, 'rifaque.rs@gmail.com', 'rifaque-new-pass')
+  assert.equal((await t.call('PATCH', `/api/program/exercises/${ex.id}`, { sets: 5 })).status, 403, 'moderator is not coach')
+  t.close()
+})
+
+test('coach can add, change, reorder and remove exercises and edit a day', async () => {
+  const t = await boot()
+  await loginAs(t, 'ssultanmaliki47@gmail.com', 'coach-new-pass')
+
+  const added = await t.call('POST', '/api/program/days/1/exercises', { name: 'Weighted Dips', sets: 3, repsMin: 8, repsMax: 12 })
+  assert.equal(added.status, 201)
+  const dips = added.body.exercises.at(-1)
+  assert.equal(dips.key, 'weighted-dips')
+  assert.equal(added.body.exercises.length, 8)
+  assert.equal((await t.call('POST', '/api/program/days/1/exercises', { name: 'weighted dips', sets: 3, repsMin: 8, repsMax: 12 })).status, 409, 'duplicate on same day')
+  assert.equal((await t.call('POST', '/api/program/days/1/exercises', { name: '', sets: 3, repsMin: 8, repsMax: 12 })).status, 400)
+  assert.equal((await t.call('POST', '/api/program/days/1/exercises', { name: 'Bad', sets: 30, repsMin: 8, repsMax: 12 })).status, 400)
+  assert.equal((await t.call('POST', '/api/program/days/1/exercises', { name: 'Bad', sets: 3, repsMin: 12, repsMax: 8 })).status, 400)
+
+  const edited = await t.call('PATCH', `/api/program/exercises/${dips.id}`, { name: 'Ring Dips', sets: 4 })
+  const changed = edited.body.exercises.find((e) => e.id === dips.id)
+  assert.equal(changed.name, 'Ring Dips')
+  assert.equal(changed.sets, 4)
+  assert.equal(changed.key, 'weighted-dips', 'key is stable so history stays linked')
+
+  const up = await t.call('POST', `/api/program/exercises/${dips.id}/move`, { direction: 'up' })
+  assert.equal(up.body.exercises.at(-2).id, dips.id)
+
+  const removed = await t.call('DELETE', `/api/program/exercises/${dips.id}`)
+  assert.equal(removed.body.exercises.length, 7)
+  assert.deepEqual(removed.body.exercises.map((e) => e.name).slice(0, 2), ['Bench Press', 'Incline Dumbbell Press'])
+
+  const day = await t.call('PUT', '/api/program/days/7', { type: 'legs', title: 'BONUS LEGS', muscles: 'Legs', focus: 'Extra', note: 'Optional' })
+  assert.equal(day.body.type, 'legs')
+  assert.equal(day.body.title, 'BONUS LEGS')
+  assert.equal((await t.call('PUT', '/api/program/days/7', { type: 'nope', title: 'X' })).status, 400)
+
+  // members see the change
+  await loginAs(t, 'mohdiyad26@gmail.com', 'iyad-new-pass')
+  assert.equal((await t.call('GET', '/api/program')).body[6].title, 'BONUS LEGS')
+  t.close()
+})
+
+test('removing an exercise from the program keeps past workout logs intact', async () => {
+  const t = await boot()
+  await loginAs(t, 'ssultanmaliki47@gmail.com', 'coach-new-pass')
+  const bench = (await t.call('GET', '/api/program')).body[0].exercises[0]
+  await t.call('PUT', '/api/logs/2026-09-21', {
+    day_number: 1, completed: true,
+    sets: [{ exercise_key: bench.key, exercise_name: bench.name, set_number: 1, weight_kg: 80, reps: 5, done: true }],
+  })
+  await t.call('DELETE', `/api/program/exercises/${bench.id}`)
+  const logs = await t.call('GET', '/api/logs')
+  assert.equal(logs.body[0].set_logs[0].exercise_name, 'Bench Press')
+  assert.equal(logs.body[0].set_logs[0].weight_kg, 80)
+  t.close()
+})

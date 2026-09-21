@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type SetLog, type WorkoutLog } from '../lib/api'
 import { useAuth } from '../lib/auth'
-import { PROGRAM, TIPS, TYPE_COLOR, dayByNumber, defaultDayFor, type Exercise } from '../lib/program'
+import { TIPS, TYPE_COLOR, defaultDayFor, type Exercise } from '../lib/program'
+import { useProgram } from '../lib/programContext'
 import { fmtDate, fmtKg, isoDate } from '../lib/stats'
 import { Button, Card, Heading, font, inputStyle } from '../components/ui'
 
@@ -21,6 +22,7 @@ interface Last {
 
 export default function Today() {
   const { profile } = useAuth()
+  const { days, dayByNumber } = useProgram()
   const userId = profile!.id
   const today = useMemo(() => new Date(), [])
   const dateStr = isoDate(today)
@@ -173,7 +175,7 @@ export default function Today() {
           <span style={{ color: colors.fg }}>Day {day.day}</span> {day.title}
         </Heading>
         <div className="flex gap-1 mb-4">
-          {PROGRAM.map((p) => (
+          {days.map((p) => (
             <button
               key={p.day}
               onClick={() => setDayNumber(p.day)}

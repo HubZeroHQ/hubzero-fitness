@@ -81,3 +81,23 @@ export const api = {
   saveMetric: (m: { measured_on: string; weight_kg: number; body_fat_pct: number | null; waist_cm: number | null }) => call<{ ok: true }>('PUT', '/metrics', m),
   deleteMetric: (id: number) => call<{ ok: true }>('DELETE', `/metrics/${id}`),
 }
+
+// ---- program (timetable) -------------------------------------------------
+import type { ProgramDay } from './program'
+
+export interface ExerciseInput {
+  name: string
+  sets: number
+  repsMin: number
+  repsMax: number
+  timed: boolean
+}
+
+export const programApi = {
+  get: () => call<ProgramDay[]>('GET', '/program'),
+  saveDay: (day: number, d: Pick<ProgramDay, 'type' | 'title' | 'muscles' | 'focus' | 'note'>) => call<ProgramDay>('PUT', `/program/days/${day}`, d),
+  addExercise: (day: number, e: ExerciseInput) => call<ProgramDay>('POST', `/program/days/${day}/exercises`, e),
+  updateExercise: (id: number, e: Partial<ExerciseInput>) => call<ProgramDay>('PATCH', `/program/exercises/${id}`, e),
+  deleteExercise: (id: number) => call<ProgramDay>('DELETE', `/program/exercises/${id}`),
+  moveExercise: (id: number, direction: 'up' | 'down') => call<ProgramDay>('POST', `/program/exercises/${id}/move`, { direction }),
+}

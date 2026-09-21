@@ -3,11 +3,13 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { useAuth } from '../lib/auth'
 import { useLogs } from '../lib/data'
 import { addDays, currentStreak, fmtDate, fmtKg, isoDate, personalRecords, volumeOf, weekStart } from '../lib/stats'
-import { PROGRAM, TYPE_COLOR, dayByNumber } from '../lib/program'
+import { TYPE_COLOR } from '../lib/program'
+import { useProgram } from '../lib/programContext'
 import { Card, Heading, Stat, chartColors, font, inputStyle, tooltipStyle } from '../components/ui'
 
 export default function Progress({ userId, name }: { userId?: number; name?: string }) {
   const { profile } = useAuth()
+  const { dayByNumber } = useProgram()
   const uid = userId ?? profile!.id
   const logs = useLogs(uid)
   const [exercise, setExercise] = useState('')
@@ -183,7 +185,7 @@ export default function Progress({ userId, name }: { userId?: number; name?: str
         ) : (
           <div className="space-y-2">
             {[...logs].reverse().slice(0, 30).map((l) => {
-              const d = PROGRAM.find((p) => p.day === l.day_number)!
+              const d = dayByNumber(l.day_number)
               return (
                 <div key={l.id} className="flex items-center justify-between text-sm py-1.5" style={{ borderTop: '1px solid #1f1f28' }}>
                   <div>

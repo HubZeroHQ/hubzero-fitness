@@ -7,6 +7,7 @@ Push / Pull / Legs+Core timetable and saves progress after every workout.
 - **My progress**: streak, weekly count, volume, personal records, charts, history.
 - **Team**: ranking of all members. Everyone can see everyone's numbers.
 - **Profile & BMI**: BMI (Asia-Pacific and WHO), healthy range, calories, body-fat estimate, weigh-in log.
+- **Edit Program** (coach only): add, change, reorder and remove exercises, and edit each day's title, type and notes.
 
 Stack: React 19 + Vite + Tailwind 4 (frontend), Node + Express + SQLite (backend, one process, one database file).
 There is **no external service, cloud account or paid dependency**.
@@ -117,7 +118,8 @@ pnpm admin add-user new@example.com "Full Name" member      # role: coach | mode
 pnpm admin set-role someone@example.com coach
 ```
 
-Roles are currently only labels (coach / moderator / member have the same permissions in the app).
+Permissions: the **coach** can edit the workout program; **moderator** and **member** have the same access
+(their own data is editable only by themselves; everyone can read everyone's progress).
 
 ## Data and backups
 
@@ -131,7 +133,7 @@ sqlite3 data/fitness.db ".backup 'backup-$(date +%F).db'"
 or stop the server and copy the file. To restore, stop the server and put the file back. `data/` is git-ignored.
 
 Tables: `users`, `sessions`, `workout_logs` (one per person per day), `set_logs` (one per set),
-`body_metrics` (weigh-ins). The schema is at the top of `server/db.js`.
+`body_metrics` (weigh-ins), `program_days` and `program_exercises` (the editable timetable). The schema is at the top of `server/db.js`.
 
 ### Using MySQL instead
 
@@ -141,18 +143,30 @@ lines): swap `node:sqlite` for the `mysql2` package, change `INTEGER PRIMARY KEY
 `AUTO_INCREMENT`, replace `ON CONFLICT ... DO UPDATE` with `ON DUPLICATE KEY UPDATE`, and make the handlers
 `async`. The frontend does not change.
 
-## Changing the timetable
+## Changing the timetable (coach)
 
-Exercises, sets and rep ranges are in `src/lib/program.ts` (from the Hub Zero timetable image). Edit and rebuild.
-Day mapping: Monday is Day 1 through Saturday Day 6, Sunday is Day 7 (rest); members can switch day on the page
-(`defaultDayFor` in the same file).
+The timetable lives in the database. The first start loads the Hub Zero timetable image's program from
+`server/program.seed.js`; after that the coach changes it inside the app under **Edit Program**:
+
+- Pick a day (1 to 7) and edit its type (Push / Pull / Legs / Rest, sets the colour), title, muscles, focus and note.
+- Edit an exercise's name, sets and rep range (or seconds for timed ones like planks), then press **Save**.
+- Reorder with the arrows, **Remove** an exercise, or **Add** a new one at the end of the day.
+
+Changes apply to everyone immediately. Past workouts, personal records and charts are never deleted: each logged set
+stores the exercise name and a stable key, and renaming an exercise keeps its key so its history stays linked.
+There are always 7 days (a day can be turned into a rest day by setting its type to Rest and removing its exercises).
+To reset the program to the original timetable, stop the server and run
+`sqlite3 data/fitness.db "DELETE FROM program_exercises; DELETE FROM program_days;"`, then start it again.
+
+Day mapping: Monday is Day 1 through Saturday Day 6, Sunday is Day 7; members can switch day on the page
+(`defaultDayFor` in `src/lib/program.ts`).
 
 ## Project layout
 
 ```
-server/        Express API + SQLite (db.js schema/seed, app.js routes, admin.js CLI, app.test.js tests)
-src/lib/       api client, auth context, timetable, BMI/health maths, stats
-src/pages/     Login, ChangePassword, Today, Progress, Team, Me
+server/        Express API + SQLite (db.js schema/seed, program.seed.js, app.js routes, admin.js CLI, app.test.js tests)
+src/lib/       api client, auth + program context, BMI/health maths, stats
+src/pages/     Login, ChangePassword, Today, Progress, Team, Me, EditProgram (coach)
 src/components Nav and shared UI
 data/          SQLite database (created on first run, not in git)
 ```
@@ -160,7 +174,7 @@ data/          SQLite database (created on first run, not in git)
 ## Tests
 
 ```bash
-pnpm test       # backend: login, forced password change, workout saving, privacy of writes, rate limit
+pnpm test       # backend: login, forced password change, workout saving, write privacy, rate limit, coach-only program edits
 ```
 
 ## Security notes

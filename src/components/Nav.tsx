@@ -1,19 +1,21 @@
 import { useAuth } from '../lib/auth'
 import { font } from './ui'
 
-export type Page = 'today' | 'progress' | 'team' | 'me'
+export type Page = 'today' | 'progress' | 'team' | 'me' | 'program'
 
-const items: { id: Page; label: string; icon: string }[] = [
+const items: { id: Page; label: string; icon: string; coachOnly?: boolean }[] = [
   { id: 'today', label: "Today's Workout", icon: '⚡' },
   { id: 'progress', label: 'My Progress', icon: '📈' },
   { id: 'team', label: 'Team', icon: '👥' },
   { id: 'me', label: 'Profile & BMI', icon: '👤' },
+  { id: 'program', label: 'Edit Program', icon: '🛠️', coachOnly: true },
 ]
 
 const roleLabel = { coach: 'Coach', moderator: 'Moderator', member: 'Member' } as const
 
 export default function Nav({ current, onNavigate }: { current: Page; onNavigate: (p: Page) => void }) {
   const { profile, signOut } = useAuth()
+  const visible = items.filter((it) => !it.coachOnly || profile?.role === 'coach')
 
   return (
     <>
@@ -34,7 +36,7 @@ export default function Nav({ current, onNavigate }: { current: Page; onNavigate
         </div>
 
         <div className="flex-1 py-4 flex flex-col gap-1 px-3">
-          {items.map((it) => {
+          {visible.map((it) => {
             const active = current === it.id
             return (
               <button
@@ -72,7 +74,7 @@ export default function Nav({ current, onNavigate }: { current: Page; onNavigate
         className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex"
         style={{ background: '#0d0d12', borderTop: '1px solid #2a2a35', paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        {items.map((it) => {
+        {visible.map((it) => {
           const active = current === it.id
           return (
             <button

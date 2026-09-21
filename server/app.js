@@ -209,6 +209,113 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     res.json({ ok: true })
   })
 
+  // ---- program (timetable): everyone reads, only the coach edits ----------
+  const requireCoach = (req, res, next) => (req.user.role === 'coach' ? next() : res.status(403).json({ error: 'Only the coach can change the program' }))
+  const TYPES = ['push', 'pull', 'legs', 'rest']
+  const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
+  const text = (v, max) => String(v ?? '').trim().slice(0, max)
+  const int = (v) => (Number.isInteger(Number(v)) && v !== '' && v !== null ? Number(v) : NaN)
+
+  const exerciseOut = (e) => ({ id: e.id, key: e.key, name: e.name, sets: e.sets, repsMin: e.reps_min, repsMax: e.reps_max, timed: !!e.timed })
+
+  function readProgram() {
+    const exercises = db.prepare('SELECT * FROM program_exercises ORDER BY day, position').all()
+    return db.prepare('SELECT * FROM program_days ORDER BY day').all().map((d) => ({
+      ...d,
+      exercises: exercises.filter((e) => e.day === d.day).map(exerciseOut),
+    }))
+  }
+
+  /** Validate exercise fields; returns { error } or the cleaned values. */
+  function cleanExercise(b, partial = false) {
+    const out = {}
+    if (!partial || b.name !== undefined) {
+      out.name = text(b.name, 80)
+      if (!out.name) return { error: 'Exercise needs a name' }
+    }
+    if (!partial || b.sets !== undefined) {
+      out.sets = int(b.sets)
+      if (!(out.sets >= 1 && out.sets <= 10)) return { error: 'Sets must be 1–10' }
+    }
+    if (!partial || b.repsMin !== undefined) out.repsMin = int(b.repsMin)
+    if (!partial || b.repsMax !== undefined) out.repsMax = int(b.repsMax)
+    for (const k of ['repsMin', 'repsMax']) {
+      if (k in out && !(out[k] >= 1 && out[k] <= 999)) return { error: 'Reps must be a whole number between 1 and 999' }
+    }
+    if (!partial || b.timed !== undefined) out.timed = !!b.timed
+    return out
+  }
+
+  app.get('/api/program', requireAuth, requireReady, (_req, res) => res.json(readProgram()))
+
+  const program = express.Router()
+  program.use(requireAuth, requireReady, requireCoach)
+
+  program.put('/days/:day', (req, res) => {
+    const day = Number(req.params.day)
+    const b = req.body ?? {}
+    if (!db.prepare('SELECT 1 FROM program_days WHERE day = ?').get(day)) return res.status(404).json({ error: 'No such day' })
+    if (!TYPES.includes(b.type)) return res.status(400).json({ error: 'Bad day type' })
+    const title = text(b.title, 40)
+    if (!title) return res.status(400).json({ error: 'Day needs a title' })
+    db.prepare('UPDATE program_days SET type = ?, title = ?, muscles = ?, focus = ?, note = ? WHERE day = ?').run(b.type, title, text(b.muscles, 80), text(b.focus, 80), text(b.note, 160), day)
+    res.json(readProgram().find((d) => d.day === day))
+  })
+
+  program.post('/days/:day/exercises', (req, res) => {
+    const day = Number(req.params.day)
+    if (!db.prepare('SELECT 1 FROM program_days WHERE day = ?').get(day)) return res.status(404).json({ error: 'No such day' })
+    const c = cleanExercise(req.body ?? {})
+    if (c.error) return res.status(400).json({ error: c.error })
+    if (c.repsMin > c.repsMax) return res.status(400).json({ error: 'Min reps cannot be above max reps' })
+    const key = slug(c.name) || `exercise-${Date.now()}`
+    if (db.prepare('SELECT 1 FROM program_exercises WHERE day = ? AND key = ?').get(day, key)) return res.status(409).json({ error: 'That exercise is already on this day' })
+    const pos = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM program_exercises WHERE day = ?').get(day).p
+    db.prepare('INSERT INTO program_exercises (day, position, key, name, sets, reps_min, reps_max, timed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(day, pos, key, c.name, c.sets, c.repsMin, c.repsMax, c.timed ? 1 : 0)
+    res.status(201).json(readProgram().find((d) => d.day === day))
+  })
+
+  program.patch('/exercises/:id', (req, res) => {
+    const id = Number(req.params.id)
+    const cur = db.prepare('SELECT * FROM program_exercises WHERE id = ?').get(id)
+    if (!cur) return res.status(404).json({ error: 'No such exercise' })
+    const c = cleanExercise(req.body ?? {}, true)
+    if (c.error) return res.status(400).json({ error: c.error })
+    const next = { name: c.name ?? cur.name, sets: c.sets ?? cur.sets, repsMin: c.repsMin ?? cur.reps_min, repsMax: c.repsMax ?? cur.reps_max, timed: c.timed ?? !!cur.timed }
+    if (next.repsMin > next.repsMax) return res.status(400).json({ error: 'Min reps cannot be above max reps' })
+    // The key stays the same on rename so past logs and personal records stay linked to this exercise.
+    db.prepare('UPDATE program_exercises SET name = ?, sets = ?, reps_min = ?, reps_max = ?, timed = ? WHERE id = ?').run(next.name, next.sets, next.repsMin, next.repsMax, next.timed ? 1 : 0, id)
+    res.json(readProgram().find((d) => d.day === cur.day))
+  })
+
+  program.delete('/exercises/:id', (req, res) => {
+    const id = Number(req.params.id)
+    const cur = db.prepare('SELECT * FROM program_exercises WHERE id = ?').get(id)
+    if (!cur) return res.status(404).json({ error: 'No such exercise' })
+    tx(db, () => {
+      db.prepare('DELETE FROM program_exercises WHERE id = ?').run(id)
+      db.prepare('UPDATE program_exercises SET position = position - 1 WHERE day = ? AND position > ?').run(cur.day, cur.position)
+    })
+    res.json(readProgram().find((d) => d.day === cur.day))
+  })
+
+  program.post('/exercises/:id/move', (req, res) => {
+    const id = Number(req.params.id)
+    const cur = db.prepare('SELECT * FROM program_exercises WHERE id = ?').get(id)
+    if (!cur) return res.status(404).json({ error: 'No such exercise' })
+    const target = cur.position + (req.body?.direction === 'up' ? -1 : 1)
+    const other = db.prepare('SELECT * FROM program_exercises WHERE day = ? AND position = ?').get(cur.day, target)
+    if (other) {
+      tx(db, () => {
+        db.prepare('UPDATE program_exercises SET position = ? WHERE id = ?').run(target, cur.id)
+        db.prepare('UPDATE program_exercises SET position = ? WHERE id = ?').run(cur.position, other.id)
+      })
+    }
+    res.json(readProgram().find((d) => d.day === cur.day))
+  })
+
+  app.use('/api/program', program)
+
   app.use('/api', data)
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }))
 

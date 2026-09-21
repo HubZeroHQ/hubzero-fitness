@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { PROGRAM_SEED } from './program.seed.js'
 
 export const DEFAULT_PASSWORD = 'hubzero'
 
@@ -91,6 +92,29 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
       UNIQUE (user_id, measured_on)
     );
 
+    -- The editable timetable: 7 fixed days, each with an ordered list of exercises.
+    CREATE TABLE IF NOT EXISTS program_days (
+      day INTEGER PRIMARY KEY CHECK (day BETWEEN 1 AND 7),
+      type TEXT NOT NULL CHECK (type IN ('push','pull','legs','rest')),
+      title TEXT NOT NULL,
+      muscles TEXT NOT NULL DEFAULT '',
+      focus TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS program_exercises (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day INTEGER NOT NULL REFERENCES program_days(day) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      sets INTEGER NOT NULL CHECK (sets BETWEEN 1 AND 10),
+      reps_min INTEGER NOT NULL,
+      reps_max INTEGER NOT NULL,
+      timed INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (day, key)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_logs_user_date ON workout_logs (user_id, log_date);
     CREATE INDEX IF NOT EXISTS idx_sets_log ON set_logs (workout_log_id);
     CREATE INDEX IF NOT EXISTS idx_metrics_user ON body_metrics (user_id, measured_on);
@@ -101,6 +125,16 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
   if (n === 0) {
     const insert = db.prepare('INSERT INTO users (email, password_hash, full_name, role) VALUES (?, ?, ?, ?)')
     for (const u of ROSTER) insert.run(u.email, hashPassword(DEFAULT_PASSWORD), u.full_name, u.role)
+  }
+  // First run (or an older database without a program): load the initial timetable.
+  const days = db.prepare('SELECT COUNT(*) AS n FROM program_days').get().n
+  if (days === 0) {
+    const insDay = db.prepare('INSERT INTO program_days (day, type, title, muscles, focus, note) VALUES (?, ?, ?, ?, ?, ?)')
+    const insEx = db.prepare('INSERT INTO program_exercises (day, position, key, name, sets, reps_min, reps_max, timed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    for (const d of PROGRAM_SEED) {
+      insDay.run(d.day, d.type, d.title, d.muscles, d.focus, d.note)
+      d.exercises.forEach((e, i) => insEx.run(d.day, i + 1, e.key, e.name, e.sets, e.repsMin, e.repsMax, e.timed ? 1 : 0))
+    }
   }
   return db
 }

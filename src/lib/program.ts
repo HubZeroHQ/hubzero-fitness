@@ -1,12 +1,13 @@
 export type DayType = 'push' | 'pull' | 'legs' | 'rest'
 
 export interface Exercise {
+  id: number
   key: string
   name: string
   sets: number
   repsMin: number
   repsMax: number
-  timed?: boolean
+  timed: boolean
 }
 
 export interface ProgramDay {
@@ -19,98 +20,11 @@ export interface ProgramDay {
   exercises: Exercise[]
 }
 
-const ex = (
-  key: string,
-  name: string,
-  sets: number,
-  repsMin: number,
-  repsMax: number,
-  timed = false,
-): Exercise => ({ key, name, sets, repsMin, repsMax, timed })
-
-// Source: the Hub Zero Fitness timetable image.
-export const PROGRAM: ProgramDay[] = [
-  {
-    day: 1, type: 'push', title: 'PUSH', muscles: 'Chest + Shoulders + Triceps',
-    focus: 'Strength + Control', note: 'Push hard, maintain good form.',
-    exercises: [
-      ex('bench-press', 'Bench Press', 3, 6, 10),
-      ex('incline-db-press', 'Incline Dumbbell Press', 3, 8, 12),
-      ex('cable-machine-fly', 'Cable / Machine Fly', 2, 10, 15),
-      ex('shoulder-press', 'Shoulder Press', 3, 6, 10),
-      ex('lateral-raises', 'Lateral Raises', 3, 12, 20),
-      ex('triceps-pushdown', 'Triceps Pushdown', 3, 10, 15),
-      ex('overhead-triceps-ext', 'Overhead Triceps Extension', 2, 10, 15),
-    ],
-  },
-  {
-    day: 2, type: 'pull', title: 'PULL', muscles: 'Back + Rear Delts + Biceps',
-    focus: 'Pull & Squeeze', note: 'Control the movement, feel the muscle.',
-    exercises: [
-      ex('lat-pulldown-pullups', 'Lat Pulldown / Pull-ups', 3, 6, 10),
-      ex('barbell-cable-row', 'Barbell / Cable Row', 3, 6, 10),
-      ex('seated-cable-row', 'Seated Cable Row', 2, 8, 12),
-      ex('face-pulls-rear-delt-fly', 'Face Pulls / Rear Delt Fly', 3, 12, 20),
-      ex('db-barbell-curl', 'Dumbbell / Barbell Curl', 3, 8, 12),
-      ex('hammer-curl', 'Hammer Curl', 2, 10, 15),
-    ],
-  },
-  {
-    day: 3, type: 'legs', title: 'LEGS + CORE', muscles: 'Legs + Core',
-    focus: 'Stronger legs, stronger you', note: 'Build a solid foundation.',
-    exercises: [
-      ex('squat-leg-press', 'Squat / Leg Press', 3, 6, 10),
-      ex('romanian-deadlift', 'Romanian Deadlift', 3, 8, 12),
-      ex('leg-extension', 'Leg Extension', 2, 10, 15),
-      ex('leg-curl', 'Leg Curl', 3, 10, 15),
-      ex('calf-raises', 'Calf Raises', 3, 10, 15),
-      ex('cable-crunch', 'Cable Crunch', 3, 10, 15),
-      ex('hanging-knee-raise', 'Hanging Knee Raise', 2, 8, 15),
-    ],
-  },
-  {
-    day: 4, type: 'push', title: 'PUSH', muscles: 'Chest + Shoulders + Triceps',
-    focus: 'Progress & Form', note: 'Slight variations, same intensity.',
-    exercises: [
-      ex('db-bench-press', 'Dumbbell Bench Press', 3, 6, 10),
-      ex('incline-machine-press', 'Incline Machine Press', 3, 8, 12),
-      ex('cable-fly-pec-deck', 'Cable Fly / Pec Deck', 2, 10, 15),
-      ex('arnold-shoulder-press', 'Arnold Press / Shoulder Press', 3, 6, 10),
-      ex('lateral-raises', 'Lateral Raises', 3, 12, 20),
-      ex('triceps-pushdown', 'Triceps Pushdown', 3, 10, 15),
-      ex('overhead-triceps-ext', 'Overhead Triceps Extension', 2, 10, 15),
-    ],
-  },
-  {
-    day: 5, type: 'pull', title: 'PULL', muscles: 'Back + Rear Delts + Biceps',
-    focus: 'Control & Strength', note: 'Pull with purpose.',
-    exercises: [
-      ex('pullups-lat-pulldown', 'Pull-ups / Lat Pulldown', 3, 6, 10),
-      ex('tbar-cable-row', 'T-Bar Row / Cable Row', 3, 8, 10),
-      ex('seated-cable-row', 'Seated Cable Row', 2, 8, 12),
-      ex('face-pulls', 'Face Pulls', 3, 12, 20),
-      ex('incline-db-curl', 'Incline Dumbbell Curl', 3, 8, 12),
-      ex('hammer-curl', 'Hammer Curl', 2, 10, 15),
-    ],
-  },
-  {
-    day: 6, type: 'legs', title: 'LEGS + CORE', muscles: 'Legs + Core',
-    focus: 'Stability & Endurance', note: 'Finish the week strong.',
-    exercises: [
-      ex('leg-press-hack-squat', 'Leg Press / Hack Squat', 3, 6, 10),
-      ex('romanian-deadlift', 'Romanian Deadlift', 3, 8, 12),
-      ex('walking-lunges', 'Walking Lunges', 2, 10, 15),
-      ex('leg-curl', 'Leg Curl', 3, 10, 15),
-      ex('calf-raises', 'Calf Raises', 3, 10, 15),
-      ex('cable-crunch', 'Cable Crunch', 3, 10, 15),
-      ex('plank-ab-wheel', 'Plank / Ab Wheel', 3, 30, 60, true),
-    ],
-  },
-  {
-    day: 7, type: 'rest', title: 'REST', muscles: 'Recover',
-    focus: 'Recharge • Come back stronger', note: "Rest is not a step back, it's a step forward.",
-    exercises: [],
-  },
+export const DAY_TYPES: { value: DayType; label: string }[] = [
+  { value: 'push', label: 'Push' },
+  { value: 'pull', label: 'Pull' },
+  { value: 'legs', label: 'Legs' },
+  { value: 'rest', label: 'Rest' },
 ]
 
 export const TYPE_COLOR: Record<DayType, { fg: string; bg: string }> = {
@@ -125,8 +39,6 @@ export function defaultDayFor(date: Date): number {
   const dow = date.getDay() // 0 = Sunday
   return dow === 0 ? 7 : dow
 }
-
-export const dayByNumber = (n: number) => PROGRAM.find((d) => d.day === n) ?? PROGRAM[0]
 
 export const TIPS = {
   cardio: '15–20 minutes cycling after lifting (3–6 days/week) at moderate intensity.',
