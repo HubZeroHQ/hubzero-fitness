@@ -36,7 +36,7 @@ export default function ChangePassword() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: '#0a0a0c' }}>
+    <div className="flex items-center justify-center px-4 py-8" style={{ background: '#0a0a0c', minHeight: '100dvh' }}>
       <form onSubmit={submit} className="w-full max-w-sm">
         <div className="text-center mb-6">
           <div className="text-3xl font-bold tracking-wide uppercase" style={{ fontFamily: font.display }}>
@@ -48,24 +48,24 @@ export default function ChangePassword() {
         </div>
         <div className="rounded-xl p-5 space-y-4" style={{ background: '#111116', border: '1px solid #2a2a35' }}>
           <Field label="Current password (the default one)">
-            <input type="password" required autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} style={inputStyle} />
+            <input type="password" required autoComplete="current-password" enterKeyHint="next" value={current} onChange={(e) => setCurrent(e.target.value)} style={inputStyle} />
           </Field>
           <Field label="New password">
-            <input type="password" required autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} style={inputStyle} />
+            <input type="password" required autoComplete="new-password" enterKeyHint="next" value={pw} onChange={(e) => setPw(e.target.value)} style={inputStyle} />
           </Field>
           <Field label="Confirm new password">
-            <input type="password" required autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} />
+            <input type="password" required autoComplete="new-password" enterKeyHint="go" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} />
           </Field>
           {error && (
-            <div className="text-sm" style={{ color: '#e63946' }}>
+            <div className="text-sm" role="alert" style={{ color: '#ff8a93' }}>
               {error}
             </div>
           )}
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy} wide>
             {busy ? 'Saving…' : 'Save password'}
           </Button>
           <div className="text-center">
-            <button type="button" onClick={signOut} className="text-xs uppercase tracking-widest" style={{ color: '#888899', fontFamily: font.display }}>
+            <button type="button" onClick={signOut} className="text-xs uppercase tracking-widest px-4" style={{ minHeight: 44, color: '#888899', fontFamily: font.display }}>
               Sign out
             </button>
           </div>

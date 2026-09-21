@@ -8,7 +8,7 @@ const items: { id: Page; label: string; short: string; icon: string; roles?: Rol
   { id: 'today', label: "Today's Workout", short: 'Today', icon: '⚡' },
   { id: 'progress', label: 'My Progress', short: 'Progress', icon: '📈' },
   { id: 'team', label: 'Team', short: 'Team', icon: '👥' },
-  { id: 'me', label: 'Profile & BMI', short: 'Profile', icon: '👤' },
+  { id: 'me', label: 'Profile & Body', short: 'Body', icon: '👤' },
   { id: 'coach', label: 'Coach Panel', short: 'Coach', icon: '🎯', roles: ['coach'] },
   { id: 'logs', label: 'Activity Log', short: 'Logs', icon: '📜', roles: ['coach', 'moderator'] },
   { id: 'program', label: 'Edit Program', short: 'Program', icon: '🛠️', roles: ['coach'] },
@@ -22,10 +22,8 @@ export default function Nav({ current, onNavigate }: { current: Page; onNavigate
 
   return (
     <>
-      <nav
-        className="hidden md:flex flex-col fixed left-0 top-0 h-full w-56 z-40"
-        style={{ background: '#0d0d12', borderRight: '1px solid #2a2a35' }}
-      >
+      {/* Desktop: side bar */}
+      <nav aria-label="Main" className="hidden md:flex flex-col fixed left-0 top-0 h-full w-56 z-40" style={{ background: '#0d0d12', borderRight: '1px solid #2a2a35' }}>
         <div className="px-5 py-5 flex items-center gap-3" style={{ borderBottom: '1px solid #2a2a35' }}>
           <img src="/assets/hubzero-logo.jpeg" alt="Hub Zero" className="w-9 h-9 rounded-md object-cover" />
           <div>
@@ -38,13 +36,14 @@ export default function Nav({ current, onNavigate }: { current: Page; onNavigate
           </div>
         </div>
 
-        <div className="flex-1 py-4 flex flex-col gap-1 px-3">
+        <div className="flex-1 py-4 flex flex-col gap-1 px-3 overflow-y-auto">
           {visible.map((it) => {
             const active = current === it.id
             return (
               <button
                 key={it.id}
                 onClick={() => onNavigate(it.id)}
+                aria-current={active ? 'page' : undefined}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-left"
                 style={{
                   background: active ? '#1a1a22' : 'transparent',
@@ -73,22 +72,33 @@ export default function Nav({ current, onNavigate }: { current: Page; onNavigate
         </div>
       </nav>
 
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex"
-        style={{ background: '#0d0d12', borderTop: '1px solid #2a2a35', paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
+      {/* Phone: tab bar on the bottom edge, where a thumb rests */}
+      <nav aria-label="Main" className="md:hidden hz-tabbar fixed bottom-0 left-0 right-0 z-40 flex" style={{ background: '#0d0d12', borderTop: '1px solid #2a2a35' }}>
         {visible.map((it) => {
           const active = current === it.id
           return (
             <button
               key={it.id}
               onClick={() => onNavigate(it.id)}
-              className="flex-1 flex flex-col items-center py-2.5 gap-0.5"
-              style={{ color: active ? '#f0f0f5' : '#888899', borderTop: active ? '2px solid #e63946' : '2px solid transparent' }}
+              aria-label={it.label}
+              aria-current={active ? 'page' : undefined}
+              className="flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5"
+              style={{
+                minHeight: 62,
+                color: active ? '#f0f0f5' : '#888899',
+                background: active ? '#15151b' : 'transparent',
+                borderTop: active ? '3px solid #e63946' : '3px solid transparent',
+              }}
             >
-              <span className="text-lg">{it.icon}</span>
-              <span className="text-[11px]" style={{ fontFamily: font.display, letterSpacing: '0.06em' }}>
-                {it.short.toUpperCase()}
+              <span className="text-xl leading-none" aria-hidden="true">
+                {it.icon}
+              </span>
+              <span
+                className="w-full text-center leading-tight overflow-hidden text-ellipsis whitespace-nowrap"
+                style={{ fontFamily: font.display, fontSize: 11, letterSpacing: '0.02em', textTransform: 'uppercase' }}
+                aria-hidden="true"
+              >
+                {it.short}
               </span>
             </button>
           )

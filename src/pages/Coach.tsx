@@ -79,7 +79,7 @@ export default function Coach({ onEditProgram }: { onEditProgram: (userId: numbe
   if (viewing) {
     return (
       <div>
-        <button onClick={() => setViewing(null)} className="text-sm mb-3" style={{ color: '#e63946', fontFamily: font.display, letterSpacing: '0.08em' }}>
+        <button onClick={() => setViewing(null)} className="text-sm mb-3 px-1" style={{ minHeight: 44, color: '#e63946', fontFamily: font.display, letterSpacing: '0.08em' }}>
           ← BACK TO COACH PANEL
         </button>
         <Progress userId={viewing.id} name={viewing.name} />
@@ -248,7 +248,7 @@ export default function Coach({ onEditProgram }: { onEditProgram: (userId: numbe
                     <span style={{ color: l.completed ? '#10b981' : '#888899', fontFamily: font.mono }}>
                       {l.completed ? `${ticked} sets · ${Math.round(volumeOf(l.set_logs)).toLocaleString()} kg` : `unfinished · ${ticked} sets`}
                     </span>
-                    <button onClick={() => deleteLog(l)} className="text-xs uppercase tracking-widest" style={{ color: '#e63946', fontFamily: font.display }}>
+                    <button onClick={() => deleteLog(l)} className="text-xs uppercase tracking-widest px-2" style={{ minHeight: 44, color: '#e63946', fontFamily: font.display }}>
                       Delete
                     </button>
                   </div>

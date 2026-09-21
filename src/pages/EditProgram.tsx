@@ -3,9 +3,9 @@ import { programApi, type ApplyRequest, type ExerciseInput, type Profile, type P
 import { useProfiles } from '../lib/data'
 import { DAY_TYPES, TYPE_COLOR, type DayType, type Exercise, type ProgramDay } from '../lib/program'
 import { useProgram } from '../lib/programContext'
-import { Button, Card, Field, Heading, font, inputStyle } from '../components/ui'
+import { Button, Card, Chip, Field, Heading, font, inputStyle } from '../components/ui'
 
-const small = { ...inputStyle, padding: '8px 10px', fontSize: 14 }
+const small = { ...inputStyle, minHeight: 44, padding: '0 10px' }
 const firstName = (p: Pick<Profile, 'full_name'>) => p.full_name.split(' ')[0]
 
 /**
@@ -89,10 +89,11 @@ export default function EditProgram({ initialScope = 0 }: { initialScope?: numbe
                 setError('')
                 setNotice('')
               }}
-              className="px-3 h-10 rounded-lg text-sm font-bold"
+              className="px-3 rounded-lg text-sm font-bold"
               style={{
+                minHeight: 44,
                 fontFamily: font.display,
-                fontSize: 16,
+                fontSize: 17,
                 background: d.day === dayNo ? TYPE_COLOR[d.type].fg : '#111116',
                 color: d.day === dayNo ? '#fff' : '#c0c0cc',
                 border: `1px solid ${d.day === dayNo ? TYPE_COLOR[d.type].fg : '#2a2a35'}`,
@@ -210,21 +211,9 @@ export default function EditProgram({ initialScope = 0 }: { initialScope?: numbe
 
 function ScopeChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className="px-3 h-10 rounded-full text-sm font-semibold"
-      style={{
-        fontFamily: font.display,
-        fontSize: 16,
-        letterSpacing: '0.03em',
-        background: active ? '#e63946' : '#111116',
-        color: active ? '#fff' : '#c0c0cc',
-        border: `1px solid ${active ? '#e63946' : '#2a2a35'}`,
-      }}
-    >
+    <Chip active={active} onClick={onClick}>
       {children}
-    </button>
+    </Chip>
   )
 }
 
@@ -275,10 +264,10 @@ function ApplyPanel({
       </div>
 
       <div className="flex gap-4 flex-wrap mb-3 text-sm">
-        <label className="flex items-center gap-2">
+        <label className="flex items-center gap-2" style={{ minHeight: 44 }}>
           <input type="radio" name="range" checked={range === 'day'} onChange={() => setRange('day')} /> Day {dayNo} only
         </label>
-        <label className="flex items-center gap-2">
+        <label className="flex items-center gap-2" style={{ minHeight: 44 }}>
           <input type="radio" name="range" checked={range === 'all'} onChange={() => setRange('all')} /> Whole program (all 7 days)
         </label>
       </div>
@@ -287,8 +276,8 @@ function ApplyPanel({
         {others.map((p) => (
           <label
             key={p.id}
-            className="flex items-center gap-2 px-3 h-10 rounded-lg text-sm"
-            style={{ background: '#0a0a0c', border: '1px solid #2a2a35', opacity: everyone ? 0.5 : 1 }}
+            className="flex items-center gap-2 px-3 rounded-lg text-sm"
+            style={{ minHeight: 44, background: '#0a0a0c', border: '1px solid #2a2a35', opacity: everyone ? 0.5 : 1 }}
           >
             <input type="checkbox" checked={everyone || picked.includes(p.id)} disabled={everyone} onChange={() => toggle(p.id)} aria-label={firstName(p)} />
             {firstName(p)}
@@ -296,7 +285,7 @@ function ApplyPanel({
         ))}
       </div>
 
-      <label className="flex items-center gap-2 text-sm mb-3">
+      <label className="flex items-center gap-2 text-sm mb-3" style={{ minHeight: 44 }}>
         <input type="checkbox" checked={everyone} onChange={(e) => setEveryone(e.target.checked)} />
         <b>Everyone at once</b>
         <span style={{ color: '#888899' }}>
@@ -398,7 +387,7 @@ function ExerciseRow({
         <input type="number" min={1} value={min} onChange={(ev) => setMin(ev.target.value)} style={{ ...small, width: 72 }} aria-label="Min reps" title={timed ? 'Min seconds' : 'Min reps'} />
         <span style={{ color: '#888899' }}>–</span>
         <input type="number" min={1} value={max} onChange={(ev) => setMax(ev.target.value)} style={{ ...small, width: 72 }} aria-label="Max reps" title={timed ? 'Max seconds' : 'Max reps'} />
-        <label className="flex items-center gap-1.5 text-xs" style={{ color: '#888899' }}>
+        <label className="flex items-center gap-1.5 text-xs" style={{ color: '#888899', minHeight: 44 }}>
           <input type="checkbox" checked={timed} onChange={(ev) => setTimed(ev.target.checked)} />
           seconds
         </label>
@@ -446,7 +435,7 @@ function AddExercise({ onAdd }: { onAdd: (e: ExerciseInput) => Promise<boolean> 
         <input type="number" min={1} value={min} onChange={(ev) => setMin(ev.target.value)} style={{ ...small, width: 72 }} aria-label="Min reps" />
         <span style={{ color: '#888899' }}>–</span>
         <input type="number" min={1} value={max} onChange={(ev) => setMax(ev.target.value)} style={{ ...small, width: 72 }} aria-label="Max reps" />
-        <label className="flex items-center gap-1.5 text-xs" style={{ color: '#888899' }}>
+        <label className="flex items-center gap-1.5 text-xs" style={{ color: '#888899', minHeight: 44 }}>
           <input type="checkbox" checked={timed} onChange={(ev) => setTimed(ev.target.checked)} />
           seconds
         </label>

@@ -17,6 +17,15 @@ const numOrNull = (v) => {
   return Number.isFinite(n) ? n : null
 }
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+/** A number within [min, max], else null (used to drop typos like a 5000 kg set instead of failing the whole save). */
+const ranged = (v, min, max) => {
+  const n = numOrNull(v)
+  return n !== null && n >= min && n <= max ? n : null
+}
+/** The site serves only its own files: no third-party scripts, styles, fonts or frames. */
+const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+/** Fingerprinted build files never change, so browsers may keep them for a year. */
+const FINGERPRINTED = /-[A-Za-z0-9_-]{8,}\.(js|css|woff2?|svg|png|jpe?g|webp)$/
 
 const publicUser = (u) => ({
   id: u.id,
@@ -34,6 +43,16 @@ const logOut = (l, sets) => ({ ...l, completed: !!l.completed, set_logs: sets.ma
 export function createApp(db, { secureCookie = false, trustProxy = false, staticDir } = {}) {
   const app = express()
   app.disable('x-powered-by')
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('X-Frame-Options', 'DENY')
+    res.setHeader('Referrer-Policy', 'same-origin')
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()')
+    res.setHeader('Content-Security-Policy', CSP)
+    // Personal data must never sit in a shared or browser cache.
+    if (req.path.startsWith('/api')) res.setHeader('Cache-Control', 'no-store')
+    next()
+  })
   if (trustProxy) app.set('trust proxy', 1) // behind nginx/Caddy: use the real client IP for login rate limiting
   app.use(express.json({ limit: '200kb' }))
 
@@ -92,6 +111,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email)
     if (!user || !verifyPassword(password, user.password_hash)) {
       fails.set(key, { count: (f && f.until > Date.now() ? f.count : 0) + 1, until: Date.now() + LOCK_MS })
+      if (fails.size > 500) for (const [k, v] of fails) if (v.until <= Date.now()) fails.delete(k)
       log(req, 'auth', 'login_failed', email, user ? 'wrong password' : 'unknown email')
       return res.status(401).json({ error: 'Wrong email or password.' })
     }
@@ -137,13 +157,12 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const b = req.body ?? {}
     const sex = b.sex === 'male' || b.sex === 'female' ? b.sex : null
     const birth = b.birth_date && isDate(b.birth_date) ? b.birth_date : null
-    db.prepare('UPDATE users SET height_cm = ?, sex = ?, birth_date = ?, goal_weight_kg = ? WHERE id = ?').run(
-      numOrNull(b.height_cm),
-      sex,
-      birth,
-      numOrNull(b.goal_weight_kg),
-      req.user.id,
-    )
+    const height = numOrNull(b.height_cm)
+    const goal = numOrNull(b.goal_weight_kg)
+    if (height !== null && !(height >= 50 && height <= 260)) return res.status(400).json({ error: 'Height must be between 50 and 260 cm.' })
+    if (goal !== null && !(goal >= 20 && goal <= 400)) return res.status(400).json({ error: 'Goal weight must be between 20 and 400 kg.' })
+    if (birth && (birth < '1900-01-01' || birth > new Date().toISOString().slice(0, 10))) return res.status(400).json({ error: 'Check the date of birth.' })
+    db.prepare('UPDATE users SET height_cm = ?, sex = ?, birth_date = ?, goal_weight_kg = ? WHERE id = ?').run(height, sex, birth, goal, req.user.id)
     res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)))
   })
 
@@ -187,7 +206,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
          ON CONFLICT (user_id, log_date) DO UPDATE SET
            day_number = excluded.day_number, day_title = excluded.day_title, day_type = excluded.day_type, completed = excluded.completed,
            duration_min = excluded.duration_min, cardio_min = excluded.cardio_min, notes = excluded.notes`,
-      ).run(req.user.id, date, day, trained?.title ?? null, trained?.type ?? null, bool(b.completed), numOrNull(b.duration_min), numOrNull(b.cardio_min), b.notes ? String(b.notes).slice(0, 500) : null)
+      ).run(req.user.id, date, day, trained?.title ?? null, trained?.type ?? null, bool(b.completed), ranged(b.duration_min, 0, 1000), ranged(b.cardio_min, 0, 1000), b.notes ? String(b.notes).slice(0, 500) : null)
       const log = db.prepare('SELECT * FROM workout_logs WHERE user_id = ? AND log_date = ?').get(req.user.id, date)
       db.prepare('DELETE FROM set_logs WHERE workout_log_id = ?').run(log.id)
       const ins = db.prepare(
@@ -195,7 +214,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
       )
       for (const s of sets) {
         if (!s?.exercise_key || !Number.isInteger(s.set_number)) continue
-        ins.run(log.id, String(s.exercise_key).slice(0, 80), String(s.exercise_name ?? s.exercise_key).slice(0, 120), s.set_number, numOrNull(s.weight_kg), numOrNull(s.reps), bool(s.done))
+        ins.run(log.id, String(s.exercise_key).slice(0, 80), String(s.exercise_name ?? s.exercise_key).slice(0, 120), s.set_number, ranged(s.weight_kg, 0, 1000), ranged(s.reps, 0, 10000), bool(s.done))
       }
       return { log, sets: db.prepare('SELECT * FROM set_logs WHERE workout_log_id = ?').all(log.id) }
     })
@@ -246,10 +265,14 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const b = req.body ?? {}
     const weight = numOrNull(b.weight_kg)
     if (!isDate(b.measured_on) || !weight || weight <= 0 || weight > 400) return res.status(400).json({ error: 'Need a date and a valid weight' })
+    const fat = numOrNull(b.body_fat_pct)
+    const waist = numOrNull(b.waist_cm)
+    if (fat !== null && !(fat >= 1 && fat <= 75)) return res.status(400).json({ error: 'Body fat must be between 1 and 75 %.' })
+    if (waist !== null && !(waist >= 30 && waist <= 250)) return res.status(400).json({ error: 'Waist must be between 30 and 250 cm.' })
     db.prepare(
       `INSERT INTO body_metrics (user_id, measured_on, weight_kg, body_fat_pct, waist_cm) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (user_id, measured_on) DO UPDATE SET weight_kg = excluded.weight_kg, body_fat_pct = excluded.body_fat_pct, waist_cm = excluded.waist_cm`,
-    ).run(req.user.id, b.measured_on, weight, numOrNull(b.body_fat_pct), numOrNull(b.waist_cm))
+    ).run(req.user.id, b.measured_on, weight, fat, waist)
     res.json({ ok: true })
   })
 
@@ -486,8 +509,19 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
 
   // ---- built frontend (production) ----------------------------------------
   if (staticDir && existsSync(resolve(staticDir, 'index.html'))) {
-    app.use(express.static(staticDir))
-    app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(resolve(staticDir, 'index.html')))
+    app.use(
+      express.static(staticDir, {
+        setHeaders(res, file) {
+          if (file.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache') // always pick up a new release
+          else if (FINGERPRINTED.test(file)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+          else res.setHeader('Cache-Control', 'public, max-age=86400')
+        },
+      }),
+    )
+    app.get(/^(?!\/api).*/, (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache')
+      res.sendFile(resolve(staticDir, 'index.html'))
+    })
   }
 
   app.use((err, _req, res, _next) => {

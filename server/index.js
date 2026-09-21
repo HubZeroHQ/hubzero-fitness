@@ -16,6 +16,17 @@ setInterval(() => {
   pruneAudit(db)
 }, 3600_000).unref()
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Hub Zero Fitness listening on http://localhost:${port}`)
 })
+
+// Stop cleanly (systemd / pm2 / Ctrl+C): finish open requests, then close the database so nothing is left half-written.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    server.close(() => {
+      db.close()
+      process.exit(0)
+    })
+    setTimeout(() => process.exit(0), 3000).unref()
+  })
+}

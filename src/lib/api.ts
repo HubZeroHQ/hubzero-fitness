@@ -60,6 +60,12 @@ export interface AuditEntry {
   ip: string | null
 }
 
+/** Fired on window when a request finds the session has ended. */
+export const SESSION_ENDED = 'hz:session-ended'
+
+export const OFFLINE_MESSAGE = "Can't reach the server. Check your connection and try again."
+
+/** status 0 means the request never got an answer (no signal, server down). */
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -69,14 +75,27 @@ export class ApiError extends Error {
   }
 }
 
+/** The server was not reached, or is temporarily unwell: worth trying again. */
+export const isUnreachable = (err: unknown) => err instanceof ApiError && (err.status === 0 || err.status >= 500 || err.status === 429)
+
+/** The server understood the request and refused it (e.g. invalid data): retrying the same thing will never work. */
+export const isRejected = (err: unknown) => err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 429
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method,
-    credentials: 'same-origin',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  let res: Response
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      credentials: 'same-origin',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError(OFFLINE_MESSAGE, 0)
+  }
   const json = await res.json().catch(() => ({}))
+  // A signed-in person whose session ended (30 days, or the coach reset their password): send them to the sign-in screen.
+  if (res.status === 401 && typeof window !== 'undefined' && !['/login', '/me', '/logout'].includes(path)) window.dispatchEvent(new Event(SESSION_ENDED))
   if (!res.ok) throw new ApiError(json.error ?? `Request failed (${res.status})`, res.status)
   return json as T
 }

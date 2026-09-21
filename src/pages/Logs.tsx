@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type AuditCategory, type AuditEntry } from '../lib/api'
-import { Button, Card, Heading, font } from '../components/ui'
+import { Button, Card, Chip, Heading, font } from '../components/ui'
 
 const FILTERS: { value: AuditCategory | ''; label: string }[] = [
   { value: '', label: 'Everything' },
@@ -84,21 +84,9 @@ export default function Logs() {
 
       <div className="flex gap-1.5 flex-wrap items-center mb-4">
         {FILTERS.map((f) => (
-          <button
-            key={f.value}
-            onClick={() => setCategory(f.value)}
-            aria-pressed={category === f.value}
-            className="px-3 h-10 rounded-full text-sm font-semibold"
-            style={{
-              fontFamily: font.display,
-              fontSize: 16,
-              background: category === f.value ? '#e63946' : '#111116',
-              color: category === f.value ? '#fff' : '#c0c0cc',
-              border: `1px solid ${category === f.value ? '#e63946' : '#2a2a35'}`,
-            }}
-          >
+          <Chip key={f.value} active={category === f.value} onClick={() => setCategory(f.value)}>
             {f.label}
-          </button>
+          </Chip>
         ))}
         <span className="flex-1" />
         <Button variant="ghost" onClick={() => load(category)}>

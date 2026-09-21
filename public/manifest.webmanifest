@@ -1,0 +1,14 @@
+{
+  "name": "Hub Zero Fitness",
+  "short_name": "HZ Fitness",
+  "description": "Workout tracker and progress log for the Hub Zero fitness team.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0c",
+  "theme_color": "#0a0a0c",
+  "icons": [
+    { "src": "/assets/hubzero-logo.jpeg", "sizes": "408x412", "type": "image/jpeg", "purpose": "any" }
+  ]
+}

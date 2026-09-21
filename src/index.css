@@ -1,6 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Fonts are bundled with the site (no Google request): faster in a gym with poor signal, and nothing leaves the server. */
+@import '@fontsource/barlow-condensed/latin-500.css';
+@import '@fontsource/barlow-condensed/latin-600.css';
+@import '@fontsource/barlow-condensed/latin-700.css';
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-500.css';
 @import 'tailwindcss';
 
 @theme {
@@ -30,24 +36,44 @@
 html {
   background: #0a0a0c;
   color: #f0f0f5;
-  font-family: 'Inter', sans-serif;
+  color-scheme: dark;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* keep the text size the designer chose when a phone is turned sideways */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   margin: 0;
-  min-height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh; /* the visible height on phones, whose address bar comes and goes */
   background: #0a0a0c;
+  /* a long name or email must wrap instead of pushing the page sideways */
+  overflow-wrap: break-word;
 }
 
-/* Hide scrollbars until hover */
-::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+/* Form controls inherit the site font. At 16px or more, iPhones do not zoom the page when a field is tapped. */
+input, select, textarea, button {
+  font-family: inherit;
 }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #3a3a48; }
+input, select, textarea {
+  font-size: 16px;
+}
+
+/* No 300 ms double-tap delay and no accidental zoom on quick repeated taps (sets, ticks, +/- buttons). */
+button, a, label, select, input, summary, [role='button'] {
+  touch-action: manipulation;
+}
+
+/* Thin scrollbars only where there is a mouse */
+@media (hover: hover) {
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a48; }
+}
 
 /* Number inputs without spinners */
 input[type='number']::-webkit-inner-spin-button,
@@ -57,24 +83,47 @@ input[type='number']::-webkit-outer-spin-button {
 }
 input[type='number'] { -moz-appearance: textfield; }
 
+/* Date fields: the same height as the other inputs on every phone */
+input[type='date'] { min-height: 48px; }
+
 /* Focus ring */
 :focus-visible {
   outline: 2px solid #e63946;
   outline-offset: 2px;
 }
 
-/* Custom checkbox */
+/* Plain checkboxes and radios (apply panel, "seconds" toggles): big enough for a thumb and in the brand colour. */
+input[type='checkbox']:not(.hz-checkbox),
+input[type='radio'] {
+  width: 24px;
+  height: 24px;
+  accent-color: #e63946;
+  flex-shrink: 0;
+}
+
+/* The set tick box: a 32px box inside a 48px tap area (see SetTick in Today) */
+.hz-tick-area {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
 .hz-checkbox {
   appearance: none;
-  width: 22px;
-  height: 22px;
-  border: 2px solid #2a2a35;
-  border-radius: 4px;
+  -webkit-appearance: none;
+  width: 32px;
+  height: 32px;
+  border: 2px solid #3a3a48;
+  border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
   flex-shrink: 0;
   position: relative;
+  margin: 0;
 }
 .hz-checkbox:hover { border-color: #10b981; }
 .hz-checkbox:checked {
@@ -85,11 +134,33 @@ input[type='number'] { -moz-appearance: textfield; }
   content: '';
   position: absolute;
   top: 3px;
-  left: 6px;
-  width: 6px;
-  height: 10px;
-  border: 2px solid #0a0a0c;
-  border-top: none;
-  border-left: none;
+  left: 9px;
+  width: 8px;
+  height: 15px;
+  border: solid #0a0a0c;
+  border-width: 0 3px 3px 0;
   transform: rotate(45deg);
+}
+.hz-checkbox:disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* Room at the bottom of the page for the fixed tab bar, including the home-indicator area on notched phones */
+.hz-page-bottom {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+@media (min-width: 768px) {
+  .hz-page-bottom { padding-bottom: 32px; }
+}
+
+/* Tab bar: sits on the bottom edge, above the home indicator */
+.hz-tabbar {
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

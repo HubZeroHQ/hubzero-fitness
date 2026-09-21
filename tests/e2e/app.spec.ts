@@ -142,22 +142,25 @@ test.describe('progress and team', () => {
     await expect(stat('Streak')).toContainText('1')
     // 62.5×9 was ticked (562.5) and 60×8 (480): total 1042.5 kg = 1.0 tonnes
     await expect(stat('Total volume')).toContainText('1.0')
-    await expect(page.getByRole('cell', { name: 'Bench Press' })).toBeVisible()
-    await expect(page.getByRole('cell', { name: '62.5 kg × 9' })).toBeVisible()
+    const records = page.getByRole('list', { name: 'Personal records' })
+    await expect(records.getByText('Bench Press')).toBeVisible()
+    await expect(records.getByText('62.5 kg × 9')).toBeVisible()
     await expect(page.getByText('Day 1 PUSH')).toBeVisible()
   })
 
-  test('Team lists all five members with Raif on top, and opens a member', async ({ page }) => {
+  test('Team shows the improvement comparison and all five members, and opens a member', async ({ page }) => {
     await signIn(page, RAIF, RAIF_PW)
     await nav(page, 'Team').click()
+    await expect(page.getByRole('heading', { name: 'Team' })).toBeVisible()
+    // the comparison is about improvement, not about who lifts more
+    await expect(page.getByText('Improvement vs previous week')).toBeVisible()
+    await expect(page.getByText(/does not reward lifting heavier/i)).toBeVisible()
     for (const name of ['Syed Mohammed Sultan', 'Rifaque Ahmed Akrami', 'Raif Karani', 'Mohammed Iyad', 'Salsabeel Kobattey']) {
-      await expect(page.locator('main').getByText(name, { exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: `Open ${name}'s progress` })).toBeVisible()
     }
-    await expect(page.locator('main').getByText('Coach', { exact: true })).toBeVisible()
-    await expect(page.locator('main').getByText('Moderator', { exact: true })).toBeVisible()
-    const first = page.locator('button', { hasText: 'Raif Karani' }).first()
-    await expect(first).toContainText('1') // 1 workout in the last 30 days
-    await first.click()
+    await expect(page.locator('main').getByText('Coach', { exact: true }).first()).toBeVisible()
+    await expect(page.locator('main').getByText('Moderator', { exact: true }).first()).toBeVisible()
+    await page.getByRole('button', { name: "Open Raif Karani's progress" }).click()
     await expect(page.getByRole('heading', { name: "Raif's Progress" })).toBeVisible()
     await page.getByRole('button', { name: /Back to team/i }).click()
     await expect(page.getByRole('heading', { name: 'Team' })).toBeVisible()
@@ -167,20 +170,20 @@ test.describe('progress and team', () => {
 test.describe('profile, BMI and weigh-ins', () => {
   test('BMI calculator gives correct numbers and categories', async ({ page }) => {
     await signIn(page, RAIF, RAIF_PW)
-    await nav(page, 'Profile & BMI').click()
+    await nav(page, 'Profile & Body').click()
     await page.getByLabel('Height (cm)').fill('175')
     await page.getByLabel('Sex').selectOption('male')
     await page.getByLabel('Date of birth').fill('2000-01-01')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page.getByText('Saved.')).toBeVisible()
 
-    await page.getByLabel('Weight (kg)', { exact: true }).first().fill('78')
+    await page.getByLabel('Try a weight (kg)').fill('78')
     await expect(page.getByText('25.5', { exact: true })).toBeVisible()
     await expect(page.getByText('Obese')).toBeVisible() // Asia-Pacific: 25+
     await expect(page.getByText('Overweight', { exact: true })).toBeVisible() // WHO: 25–29.9
     await expect(page.getByText(/56\.7–70\.1 kg/)).toBeVisible()
 
-    await page.getByLabel('Weight (kg)', { exact: true }).first().fill('68')
+    await page.getByLabel('Try a weight (kg)').fill('68')
     await expect(page.getByText('22.2', { exact: true })).toBeVisible()
     await expect(page.getByText('Normal').first()).toBeVisible()
 
@@ -190,7 +193,7 @@ test.describe('profile, BMI and weigh-ins', () => {
 
   test('profile details persist across a reload', async ({ page }) => {
     await signIn(page, RAIF, RAIF_PW)
-    await nav(page, 'Profile & BMI').click()
+    await nav(page, 'Profile & Body').click()
     await expect(page.getByLabel('Height (cm)')).toHaveValue('175')
     await expect(page.getByLabel('Sex')).toHaveValue('male')
     await expect(page.getByLabel('Date of birth')).toHaveValue('2000-01-01')
@@ -198,20 +201,21 @@ test.describe('profile, BMI and weigh-ins', () => {
 
   test('weigh-ins can be added and removed', async ({ page }) => {
     await signIn(page, RAIF, RAIF_PW)
-    await nav(page, 'Profile & BMI').click()
-    await page.getByLabel('Weight (kg)', { exact: true }).nth(1).fill('79.5')
+    await nav(page, 'Profile & Body').click()
+    await page.getByLabel('Weight (kg)', { exact: true }).fill('79.5')
     await page.getByLabel('Waist cm (opt.)').fill('84')
     await page.getByRole('button', { name: 'Add', exact: true }).click()
     await expect(page.getByText('79.5 kg · 84 cm waist')).toBeVisible()
     // the calculator now uses the latest weigh-in
     await expect(page.getByText('26.0', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'remove' }).first().click()
+    page.once('dialog', (d) => d.accept())
+    await page.getByRole('button', { name: 'Remove' }).first().click()
     await expect(page.getByText('79.5 kg · 84 cm waist')).toHaveCount(0)
   })
 
   test('changing the password from the profile page needs the current one', async ({ page }) => {
     await signIn(page, RAIF, RAIF_PW)
-    await nav(page, 'Profile & BMI').click()
+    await nav(page, 'Profile & Body').click()
     await page.getByLabel('Current password').fill('wrong')
     await page.getByLabel('New password').fill('Another-Strong-2')
     await page.getByLabel('Confirm', { exact: true }).fill('Another-Strong-2')
@@ -330,7 +334,7 @@ test.describe('coach edits the program', () => {
     await signIn(member, RAIF, RAIF_PW)
     await expect(member.getByText('E2E WEIGHTED DIPS')).toHaveCount(0)
     await member.getByRole('button', { name: 'My Progress' }).first().click()
-    await expect(member.getByRole('cell', { name: '62.5 kg × 9' })).toBeVisible()
+    await expect(member.getByRole('list', { name: 'Personal records' }).getByText('62.5 kg × 9')).toBeVisible()
   })
 
   test('coach cancelling the remove dialog keeps the exercise', async ({ page }) => {
@@ -360,7 +364,7 @@ test.describe('phone layout', () => {
     const bottom = page.locator('nav').last()
     await expect(bottom).toBeVisible()
     await expect(page.locator('nav').first()).toBeHidden() // desktop sidebar is hidden
-    for (const [label, heading] of [['Progress', 'My Progress'], ['Team', 'Team'], ['Profile', 'Profile & BMI']] as const) {
+    for (const [label, heading] of [['Progress', 'My Progress'], ['Team', 'Team'], ['Profile', 'Profile & Body']] as const) {
       await bottom.getByRole('button', { name: new RegExp(label, 'i') }).click()
       await expect(page.getByRole('heading', { name: heading })).toBeVisible()
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)

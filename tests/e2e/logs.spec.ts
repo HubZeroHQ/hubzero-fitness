@@ -140,7 +140,7 @@ test.describe('on a phone', () => {
     await signIn(page, MOD)
     const bottom = page.locator('nav').last()
     await expect(bottom.getByRole('button')).toHaveCount(5)
-    await bottom.getByRole('button', { name: /Logs/i }).click()
+    await bottom.getByRole('button', { name: /Activity Log/i }).click()
     await expect(page.getByRole('heading', { name: 'Activity Log' })).toBeVisible()
     await expect(entries(page).first()).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)

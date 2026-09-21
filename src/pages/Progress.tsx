@@ -109,7 +109,7 @@ export default function Progress({ userId, name }: { userId?: number; name?: str
                 <XAxis dataKey="date" stroke={chartColors.axis} fontSize={11} />
                 <YAxis stroke={chartColors.axis} fontSize={11} width={45} />
                 <Tooltip {...tooltipStyle} />
-                <Bar dataKey="volume" fill={chartColors.red} radius={[3, 3, 0, 0]} />
+                <Bar dataKey="volume" fill={chartColors.red} radius={[3, 3, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -120,7 +120,7 @@ export default function Progress({ userId, name }: { userId?: number; name?: str
             <div className="text-xs uppercase tracking-widest" style={{ color: '#888899', fontFamily: font.display }}>
               Best set over time (kg)
             </div>
-            <select value={selected} onChange={(e) => setExercise(e.target.value)} style={{ ...inputStyle, width: 'auto', padding: '6px 8px', fontSize: 13 }}>
+            <select value={selected} onChange={(e) => setExercise(e.target.value)} style={{ ...inputStyle, width: 'auto', maxWidth: '58%' }}>
               {data.prs.map((p) => (
                 <option key={p.exercise_key} value={p.exercise_key}>
                   {p.exercise_name}
@@ -137,7 +137,7 @@ export default function Progress({ userId, name }: { userId?: number; name?: str
                 <XAxis dataKey="date" stroke={chartColors.axis} fontSize={11} />
                 <YAxis stroke={chartColors.axis} fontSize={11} width={40} domain={['dataMin - 5', 'dataMax + 5']} />
                 <Tooltip {...tooltipStyle} />
-                <Line type="monotone" dataKey="weight" stroke={chartColors.green} strokeWidth={2.5} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="weight" stroke={chartColors.green} strokeWidth={2.5} dot={{ r: 3 }} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -151,30 +151,24 @@ export default function Progress({ userId, name }: { userId?: number; name?: str
         {data.prs.length === 0 ? (
           <Empty>No records yet. Log a set with weight and reps and tick it.</Empty>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ color: '#888899', textAlign: 'left' }}>
-                  <th className="py-1 font-normal">Exercise</th>
-                  <th className="font-normal">Best set</th>
-                  <th className="font-normal">Est. 1RM</th>
-                  <th className="font-normal">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.prs.map((p) => (
-                  <tr key={p.exercise_key} style={{ borderTop: '1px solid #1f1f28' }}>
-                    <td className="py-2">{p.exercise_name}</td>
-                    <td style={{ fontFamily: font.mono }}>
-                      {fmtKg(p.weight_kg)} kg × {p.reps}
-                    </td>
-                    <td style={{ fontFamily: font.mono, color: '#f59e0b' }}>{fmtKg(p.est1rm)} kg</td>
-                    <td style={{ color: '#888899' }}>{fmtDate(p.date)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul aria-label="Personal records">
+            {data.prs.map((p) => (
+              <li key={p.exercise_key} className="py-2.5" style={{ borderTop: '1px solid #1f1f28' }}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <b className="min-w-0">{p.exercise_name}</b>
+                  <span className="whitespace-nowrap" style={{ fontFamily: font.mono, fontSize: 14 }}>
+                    {fmtKg(p.weight_kg)} kg × {p.reps}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3 text-xs mt-0.5" style={{ color: '#888899' }}>
+                  <span>
+                    est. 1RM <span style={{ color: '#f59e0b', fontFamily: font.mono }}>{fmtKg(p.est1rm)} kg</span>
+                  </span>
+                  <span>{fmtDate(p.date)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
 
@@ -227,7 +221,7 @@ function HistoryRow({ log, fallback, canDelete, onDelete }: { log: FullLog; fall
 
   return (
     <div style={{ borderTop: '1px solid #1f1f28' }}>
-      <button className="w-full flex items-center justify-between text-sm py-1.5 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button className="w-full flex items-center justify-between gap-3 text-sm text-left" style={{ minHeight: 48 }} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <div>
           <span style={{ color: TYPE_COLOR[type].fg, fontFamily: font.display, fontSize: 16 }}>
             Day {log.day_number} {title}
@@ -258,7 +252,7 @@ function HistoryRow({ log, fallback, canDelete, onDelete }: { log: FullLog; fall
             </div>
           )}
           {canDelete && (
-            <button onClick={onDelete} className="text-xs uppercase tracking-widest" style={{ color: '#e63946', fontFamily: font.display }}>
+            <button onClick={onDelete} className="text-xs uppercase tracking-widest pr-3" style={{ minHeight: 44, color: '#e63946', fontFamily: font.display }}>
               Delete this workout
             </button>
           )}
