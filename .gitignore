@@ -22,3 +22,8 @@ logs/
 
 # Local SQLite database and env
 /data/
+
+# Test output
+/tests/.e2e-data/
+/test-results/
+/playwright-report/

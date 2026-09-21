@@ -3,12 +3,12 @@ import { font } from './ui'
 
 export type Page = 'today' | 'progress' | 'team' | 'me' | 'program'
 
-const items: { id: Page; label: string; icon: string; coachOnly?: boolean }[] = [
-  { id: 'today', label: "Today's Workout", icon: '⚡' },
-  { id: 'progress', label: 'My Progress', icon: '📈' },
-  { id: 'team', label: 'Team', icon: '👥' },
-  { id: 'me', label: 'Profile & BMI', icon: '👤' },
-  { id: 'program', label: 'Edit Program', icon: '🛠️', coachOnly: true },
+const items: { id: Page; label: string; short: string; icon: string; coachOnly?: boolean }[] = [
+  { id: 'today', label: "Today's Workout", short: 'Today', icon: '⚡' },
+  { id: 'progress', label: 'My Progress', short: 'Progress', icon: '📈' },
+  { id: 'team', label: 'Team', short: 'Team', icon: '👥' },
+  { id: 'me', label: 'Profile & BMI', short: 'Profile', icon: '👤' },
+  { id: 'program', label: 'Edit Program', short: 'Program', icon: '🛠️', coachOnly: true },
 ]
 
 const roleLabel = { coach: 'Coach', moderator: 'Moderator', member: 'Member' } as const
@@ -85,7 +85,7 @@ export default function Nav({ current, onNavigate }: { current: Page; onNavigate
             >
               <span className="text-lg">{it.icon}</span>
               <span className="text-[11px]" style={{ fontFamily: font.display, letterSpacing: '0.06em' }}>
-                {it.label.split(' ')[0].toUpperCase()}
+                {it.short.toUpperCase()}
               </span>
             </button>
           )

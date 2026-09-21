@@ -326,6 +326,8 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
   }
 
   app.use((err, _req, res, _next) => {
+    // Client mistakes (bad JSON, body too large) are not server errors.
+    if (err.status >= 400 && err.status < 500) return res.status(err.status).json({ error: err.status === 413 ? 'Request too large' : 'Bad request' })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   })

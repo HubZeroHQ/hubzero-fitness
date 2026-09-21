@@ -174,8 +174,22 @@ data/          SQLite database (created on first run, not in git)
 ## Tests
 
 ```bash
-pnpm test       # backend: login, forced password change, workout saving, write privacy, rate limit, coach-only program edits
+pnpm test          # backend API tests + unit tests (fast, ~10 s)
+pnpm test:e2e      # builds the site and drives it in a real Chrome (about 1 minute)
+pnpm test:all      # everything
 ```
+
+- **Backend** (`server/app.test.js`, `server/edge.test.js`, 23 tests): login, forced password change, session
+  handling, password hashing, cookie flags, every route rejecting signed-out users, input validation, workout and
+  weigh-in saving, coach-only program editing, login lockout, the admin CLI, and idempotent database start-up.
+- **Unit** (`src/lib/*.test.ts`, 40 tests): BMI and categories (WHO and Asia-Pacific), healthy range, BMR, age,
+  body fat, estimated 1RM, streaks, personal records, volume and date helpers.
+- **End-to-end** (`tests/e2e/app.spec.ts`, 24 tests): the real production build in Chrome on a throwaway database,
+  covering first login and password change, logging and finishing a workout, progress, team, BMI and weigh-ins,
+  role restrictions, the coach editing the program while a member watches, and the phone layout.
+
+The end-to-end tests use the Chrome already installed on the machine (no browser download) and always start from an
+empty database, so they never touch real data.
 
 ## Security notes
 
