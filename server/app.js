@@ -2,7 +2,7 @@ import express from 'express'
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { DEFAULT_PASSWORD, hashPassword, tx, verifyPassword } from './db.js'
+import { AUDIT_CATEGORIES, DEFAULT_PASSWORD, audit, hashPassword, tx, verifyPassword } from './db.js'
 
 const COOKIE = 'hz_session'
 const SESSION_DAYS = 30
@@ -72,6 +72,11 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
   const requireReady = (req, res, next) =>
     req.user.must_change_password ? res.status(403).json({ error: 'Change your password first' }) : next()
 
+  /** Add an entry to the activity log for the signed-in user (or for nobody, e.g. a failed sign-in). */
+  const log = (req, category, action, target = '', detail = '') =>
+    audit(db, { actorId: req?.user?.id ?? null, actorName: req?.user?.full_name ?? null, category, action, target, detail, ip: req?.ip ?? null })
+  const requireStaff = (req, res, next) => (['coach', 'moderator'].includes(req.user.role) ? next() : res.status(403).json({ error: 'Only the coach and moderator can see the logs' }))
+
   const requireCoach = (req, res, next) => (req.user.role === 'coach' ? next() : res.status(403).json({ error: 'Only the coach can do that' }))
 
   // ---- auth routes --------------------------------------------------------
@@ -81,21 +86,28 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const key = `${req.ip}|${email}`
     const f = fails.get(key)
     if (f && f.count >= MAX_FAILS && f.until > Date.now()) {
+      log(req, 'auth', 'login_locked', email, 'too many wrong passwords')
       return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' })
     }
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email)
     if (!user || !verifyPassword(password, user.password_hash)) {
       fails.set(key, { count: (f && f.until > Date.now() ? f.count : 0) + 1, until: Date.now() + LOCK_MS })
+      log(req, 'auth', 'login_failed', email, user ? 'wrong password' : 'unknown email')
       return res.status(401).json({ error: 'Wrong email or password.' })
     }
     fails.delete(key)
     startSession(res, user.id)
+    log({ user, ip: req.ip }, 'auth', 'login', user.email)
     res.json(publicUser(user))
   })
 
   app.post('/api/logout', (req, res) => {
     const token = readToken(req)
-    if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha(token))
+    if (token) {
+      const who = db.prepare('SELECT u.id, u.full_name, u.email FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?').get(sha(token))
+      if (who) log({ user: who, ip: req.ip }, 'auth', 'logout', who.email)
+      db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha(token))
+    }
     res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; Max-Age=0`)
     res.json({ ok: true })
   })
@@ -113,6 +125,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
       // Sign out every other device; keep the current one.
       db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').run(req.user.id, sha(readToken(req)))
     })
+    log(req, 'auth', 'password_changed', req.user.email, req.user.must_change_password ? 'first login' : '')
     res.json(publicUser({ ...req.user, must_change_password: 0 }))
   })
 
@@ -165,6 +178,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const sets = Array.isArray(b.sets) ? b.sets.slice(0, 200) : []
     // Remember which workout they actually did, since the coach can later change what a day contains.
     const trained = effectiveProgram(req.user.id).find((d) => d.day === day)
+    const wasDone = !!db.prepare('SELECT completed FROM workout_logs WHERE user_id = ? AND log_date = ?').get(req.user.id, date)?.completed
 
     const saved = tx(db, () => {
       db.prepare(
@@ -185,12 +199,26 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
       }
       return { log, sets: db.prepare('SELECT * FROM set_logs WHERE workout_log_id = ?').all(log.id) }
     })
+    if (saved.log.completed && !wasDone) log(req, 'workout', 'workout_finished', `${trained?.title ?? `Day ${day}`} · ${date}`, `${saved.sets.filter((s) => s.done).length} sets`)
     res.json(logOut(saved.log, saved.sets))
+  })
+
+  // Activity log, newest first. Filter with ?category=, page with ?before=<id of the last row you have>.
+  data.get('/audit', requireStaff, (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200)
+    const category = AUDIT_CATEGORIES.includes(String(req.query.category)) ? String(req.query.category) : null
+    const before = numOrNull(req.query.before)
+    const rows = db
+      .prepare(`SELECT * FROM audit_log WHERE (? IS NULL OR category = ?) AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?`)
+      .all(category, category, before, before, limit + 1)
+    res.json({ rows: rows.slice(0, limit), hasMore: rows.length > limit })
   })
 
   // Coach: remove a workout log (e.g. one entered by mistake). Its sets go with it.
   data.delete('/logs/:id', requireCoach, (req, res) => {
+    const gone = db.prepare('SELECT l.log_date, l.day_title, u.full_name FROM workout_logs l JOIN users u ON u.id = l.user_id WHERE l.id = ?').get(Number(req.params.id))
     db.prepare('DELETE FROM workout_logs WHERE id = ?').run(Number(req.params.id))
+    if (gone) log(req, 'workout', 'workout_deleted', `${gone.full_name} · ${gone.log_date}`, gone.day_title ?? '')
     res.json({ ok: true })
   })
 
@@ -201,6 +229,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const r = db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(hashPassword(DEFAULT_PASSWORD), id)
     if (r.changes !== 1) return res.status(404).json({ error: 'No such user' })
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id)
+    log(req, 'auth', 'password_reset', db.prepare('SELECT full_name FROM users WHERE id = ?').get(id)?.full_name ?? String(id), 'reset to the default password')
     res.json({ ok: true })
   })
 
@@ -225,7 +254,11 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
   })
 
   data.delete('/metrics/:id', (req, res) => {
-    if (req.user.role === 'coach') db.prepare('DELETE FROM body_metrics WHERE id = ?').run(Number(req.params.id))
+    if (req.user.role === 'coach') {
+      const gone = db.prepare('SELECT m.measured_on, u.full_name, u.id FROM body_metrics m JOIN users u ON u.id = m.user_id WHERE m.id = ?').get(Number(req.params.id))
+      db.prepare('DELETE FROM body_metrics WHERE id = ?').run(Number(req.params.id))
+      if (gone && gone.id !== req.user.id) log(req, 'workout', 'weigh_in_deleted', `${gone.full_name} · ${gone.measured_on}`)
+    }
     else db.prepare('DELETE FROM body_metrics WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id)
     res.json({ ok: true })
   })
@@ -244,6 +277,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
   })
   const dayRow = (owner, day) => db.prepare('SELECT * FROM program_days WHERE owner = ? AND day = ?').get(owner, day)
   const userExists = (id) => id === 0 || !!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)
+  const scopeLabel = (owner) => (owner === 0 ? 'team default' : (db.prepare('SELECT full_name FROM users WHERE id = ?').get(owner)?.full_name ?? `user ${owner}`))
 
   /** The 7 days a person actually trains: their own copy where they have one, otherwise the team's. */
   function effectiveProgram(userId) {
@@ -323,6 +357,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const title = text(b.title, 40)
     if (!title) return res.status(400).json({ error: 'Day needs a title' })
     db.prepare('UPDATE program_days SET type = ?, title = ?, muscles = ?, focus = ?, note = ? WHERE id = ?').run(b.type, title, text(b.muscles, 80), text(b.focus, 80), text(b.note, 160), row.id)
+    log(req, 'program', 'program_day_edited', `Day ${row.day} · ${scopeLabel(row.owner)}`, `${b.type}, "${title}"`)
     res.json(dayOut(db.prepare('SELECT * FROM program_days WHERE id = ?').get(row.id)))
   })
 
@@ -336,6 +371,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     if (db.prepare('SELECT 1 FROM program_exercises WHERE day_id = ? AND key = ?').get(row.id, key)) return res.status(409).json({ error: 'That exercise is already on this day' })
     const pos = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM program_exercises WHERE day_id = ?').get(row.id).p
     db.prepare('INSERT INTO program_exercises (day_id, position, key, name, sets, reps_min, reps_max, timed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(row.id, pos, key, c.name, c.sets, c.repsMin, c.repsMax, c.timed ? 1 : 0)
+    log(req, 'program', 'program_exercise_added', `Day ${row.day} · ${scopeLabel(row.owner)}`, `${c.name} ${c.sets}×${c.repsMin}–${c.repsMax}`)
     res.status(201).json(dayOut(row))
   })
 
@@ -354,6 +390,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     if (next.repsMin > next.repsMax) return res.status(400).json({ error: 'Min reps cannot be above max reps' })
     // The key stays the same on rename so past logs and personal records stay linked to this exercise.
     db.prepare('UPDATE program_exercises SET name = ?, sets = ?, reps_min = ?, reps_max = ?, timed = ? WHERE id = ?').run(next.name, next.sets, next.repsMin, next.repsMax, next.timed ? 1 : 0, cur.id)
+    log(req, 'program', 'program_exercise_edited', `Day ${row.day} · ${scopeLabel(row.owner)}`, `${cur.name} → ${next.name} ${next.sets}×${next.repsMin}–${next.repsMax}`)
     res.json(dayOut(row))
   })
 
@@ -365,6 +402,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
       db.prepare('DELETE FROM program_exercises WHERE id = ?').run(cur.id)
       db.prepare('UPDATE program_exercises SET position = position - 1 WHERE day_id = ? AND position > ?').run(cur.day_id, cur.position)
     })
+    log(req, 'program', 'program_exercise_removed', `Day ${row.day} · ${scopeLabel(row.owner)}`, cur.name)
     res.json(dayOut(row))
   })
 
@@ -392,6 +430,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     if (!team) return res.status(404).json({ error: 'No such day' })
     if (dayRow(owner, day)) return res.status(409).json({ error: 'Already customised' })
     tx(db, () => copyDay(team, owner))
+    log(req, 'program', 'program_day_customised', `Day ${day} · ${scopeLabel(owner)}`)
     res.status(201).json(dayOut(dayRow(owner, day)))
   })
 
@@ -401,6 +440,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const owner = int(req.query.owner)
     if (!(owner > 0)) return res.status(400).json({ error: 'Choose a person' })
     db.prepare('DELETE FROM program_days WHERE owner = ? AND day = ?').run(owner, day)
+    log(req, 'program', 'program_day_reset', `Day ${day} · ${scopeLabel(owner)}`, 'back to the team version')
     res.json({ ok: true })
   })
 
@@ -435,6 +475,7 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
         }
       }
     })
+    log(req, 'program', 'program_applied', days.length === 7 ? 'whole program' : `Day ${days.join(', ')}`, `from ${scopeLabel(from)} to ${everyone ? 'everyone at once' : targets.map(scopeLabel).join(', ')}`)
     res.json({ ok: true, days: days.length })
   })
 

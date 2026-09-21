@@ -45,7 +45,8 @@ const goToEditor = async (page: Page) => page.getByRole('button', { name: 'Edit 
 async function addExercise(page: Page, name: string) {
   await page.getByPlaceholder('Exercise name').fill(name)
   await page.getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(page.locator(`input[value="${name}"]`)).toBeVisible()
+  // the new exercise's own row (the "Add" box below keeps the typed text for a moment, so match on the row's label)
+  await expect(page.locator(`input[aria-label="Exercise name"][value="${name}"]`)).toBeVisible()
 }
 
 /** The exercise names on one day of a member's own program (what they would train on). */
@@ -301,10 +302,10 @@ test.describe('coach oversight and control', () => {
 test.describe('coach on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 
-  test('all six tabs fit and the coach pages do not scroll sideways', async ({ page }) => {
+  test('all seven tabs fit and the coach pages do not scroll sideways', async ({ page }) => {
     await signIn(page, COACH)
     const bottom = page.locator('nav').last()
-    await expect(bottom.getByRole('button')).toHaveCount(6)
+    await expect(bottom.getByRole('button')).toHaveCount(7)
     const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
 
     await bottom.getByRole('button', { name: /Coach/i }).click()

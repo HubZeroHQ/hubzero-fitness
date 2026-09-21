@@ -131,6 +131,20 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
       UNIQUE (day_id, key)
     );
 
+    -- Activity log: who did what. Never stores passwords.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL DEFAULT (datetime('now')),
+      actor_id INTEGER,
+      actor_name TEXT,
+      category TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
+      ip TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_cat ON audit_log (category, id);
     CREATE INDEX IF NOT EXISTS idx_logs_user_date ON workout_logs (user_id, log_date);
     CREATE INDEX IF NOT EXISTS idx_sets_log ON set_logs (workout_log_id);
     CREATE INDEX IF NOT EXISTS idx_metrics_user ON body_metrics (user_id, measured_on);
@@ -171,6 +185,32 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
     }
   }
   return db
+}
+
+export const AUDIT_CATEGORIES = ['auth', 'program', 'workout', 'admin']
+const AUDIT_KEEP = 20000
+
+/** Record an event in the activity log. Logging must never break the request that caused it. */
+export function audit(db, { actorId = null, actorName = null, category, action, target = '', detail = '', ip = null }) {
+  try {
+    const clip = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
+    db.prepare('INSERT INTO audit_log (actor_id, actor_name, category, action, target, detail, ip) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      actorId,
+      actorName ? clip(actorName, 80) : null,
+      category,
+      clip(action, 60),
+      clip(target, 160),
+      clip(detail, 300),
+      ip ? clip(ip, 60) : null,
+    )
+  } catch (err) {
+    console.error('audit log write failed', err)
+  }
+}
+
+/** Keep the activity log from growing forever: drop everything older than the newest AUDIT_KEEP entries. */
+export function pruneAudit(db) {
+  db.prepare('DELETE FROM audit_log WHERE id <= (SELECT MAX(id) FROM audit_log) - ?').run(AUDIT_KEEP)
 }
 
 /** Run fn inside a transaction; roll back if it throws. */

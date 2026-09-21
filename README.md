@@ -10,6 +10,8 @@ Push / Pull / Legs+Core timetable and saves progress after every workout.
 - **Coach Panel** (coach only): every member's status at a glance (trained today, last workout, streak, weight,
   who needs a nudge), a team activity feed, and the coach's controls: open anyone's full progress, edit their
   program, reset their password, delete a workout entered by mistake.
+- **Activity Log** (coach and moderator, read-only): who signed in, failed sign-ins, password changes and resets,
+  program edits, workouts finished or deleted, and admin commands, newest first, with filters.
 - **Edit Program** (coach only): change the team's program, or give any one person their own version. Add, edit,
   reorder and remove exercises, and copy a day (or the whole week) to chosen people or to everyone at once.
 
@@ -126,8 +128,25 @@ pnpm admin set-role someone@example.com coach
 
 Permissions: the **coach** controls the workout programs (team and personal), can reset members' passwords and delete
 workouts or weigh-ins; **moderator** and **member** have the same access (their own data is editable only by
-themselves; everyone can read everyone's progress). The coach can also reset passwords inside the app
+themselves; everyone can read everyone's progress). The moderator's extra ability is reading the Activity Log.
+The coach can also reset passwords inside the app
 (Coach Panel), so the command line is only needed if the coach is locked out.
+
+## Activity log
+
+The coach and the moderator have an **Activity Log** tab (read-only). It records:
+
+| Filter | Events |
+| ------ | ------ |
+| Sign-ins & passwords | sign-ins, failed sign-ins (with the email tried and whether it exists), lockouts after too many wrong passwords, sign-outs, password changes, password resets by the coach |
+| Program changes | day edits, exercises added / changed / removed, a person given their own day or reset to the team version, programs applied to people or everyone |
+| Workouts | workouts finished (once, not on every autosave), workouts and weigh-ins deleted by the coach |
+| Server admin | `pnpm admin` commands (reset password, add user, set role) |
+
+Each entry has the time, who did it, the target, details, and the address it came from. **Passwords are never
+recorded**, not even wrong ones. Behind nginx set `TRUST_PROXY=true` so the address is the visitor's rather than the
+proxy's. The log keeps the newest 20,000 entries and older ones are dropped automatically. It lives in the same
+SQLite database (`audit_log` table), so it is included in backups.
 
 ## Data and backups
 
@@ -141,7 +160,7 @@ sqlite3 data/fitness.db ".backup 'backup-$(date +%F).db'"
 or stop the server and copy the file. To restore, stop the server and put the file back. `data/` is git-ignored.
 
 Tables: `users`, `sessions`, `workout_logs` (one per person per day), `set_logs` (one per set),
-`body_metrics` (weigh-ins), `program_days` and `program_exercises` (the editable timetable: `owner` 0 is the team
+`body_metrics` (weigh-ins), `audit_log` (the activity log), `program_days` and `program_exercises` (the editable timetable: `owner` 0 is the team
 default, any other owner is that person's own copy of a day). The schema is at the top of `server/db.js`.
 
 ### Using MySQL instead
@@ -192,7 +211,7 @@ program, its exercises and all history are kept).
 ```
 server/        Express API + SQLite (db.js schema/seed, program.seed.js, app.js routes, admin.js CLI, app.test.js tests)
 src/lib/       api client, auth + program context, BMI/health maths, stats
-src/pages/     Login, ChangePassword, Today, Progress, Team, Me, Coach + EditProgram (coach only)
+src/pages/     Login, ChangePassword, Today, Progress, Team, Me, Logs (coach + moderator), Coach + EditProgram (coach only)
 src/components Nav and shared UI
 data/          SQLite database (created on first run, not in git)
 ```
@@ -200,22 +219,24 @@ data/          SQLite database (created on first run, not in git)
 ## Tests
 
 ```bash
-pnpm test          # backend API tests + unit tests (fast, ~15 s)
+pnpm test          # backend API tests + unit tests (fast, ~20 s)
 pnpm test:e2e      # builds the site and drives it in a real Chrome (about 2 minutes)
 pnpm test:all      # everything
 ```
 
-- **Backend** (`server/*.test.js`, 37 tests): login, forced password change, session handling, password hashing,
+- **Backend** (`server/*.test.js`, 47 tests): login, forced password change, session handling, password hashing,
   cookie flags, every route rejecting signed-out users, input validation, workout and weigh-in saving, coach-only
   actions, personal programs (customise, edit, reset, apply to some people or everyone, day name snapshots),
-  password reset and deletions by the coach, login lockout, the admin CLI, and the migration of an older database.
+  password reset and deletions by the coach, login lockout, the admin CLI, the migration of an older database, and the
+  activity log (what is recorded, that passwords never are, access rules, filtering, paging and trimming).
 - **Unit** (`src/lib/*.test.ts`, 40 tests): BMI and categories (WHO and Asia-Pacific), healthy range, BMR, age,
   body fat, estimated 1RM, streaks, personal records, volume and date helpers.
-- **End-to-end** (`tests/e2e/*.spec.ts`, 37 tests): the real production build in Chrome on a throwaway database:
+- **End-to-end** (`tests/e2e/*.spec.ts`, 44 tests): the real production build in Chrome on a throwaway database:
   first login and password change, logging and finishing a workout, progress, team, BMI and weigh-ins, role
   restrictions, the coach editing the team program and personal programs while members watch, applying programs to
   people or everyone, the Coach Panel (status, opening a set-by-set history, deleting a workout, resetting a
-  password), and the phone layout for members and the coach.
+  password), the moderator's Activity Log (filters, failed sign-ins, paging, who can and cannot see it), and the phone
+  layout for members, the moderator and the coach.
 
 The end-to-end tests use the Chrome already installed on the machine (no browser download) and always start from an
 empty database, so they never touch real data.

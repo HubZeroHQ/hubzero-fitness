@@ -45,6 +45,21 @@ export interface BodyMetric {
   waist_cm: number | null
 }
 
+export type AuditCategory = 'auth' | 'program' | 'workout' | 'admin'
+
+export interface AuditEntry {
+  id: number
+  /** UTC, "YYYY-MM-DD HH:MM:SS". */
+  at: string
+  actor_id: number | null
+  actor_name: string | null
+  category: AuditCategory
+  action: string
+  target: string
+  detail: string
+  ip: string | null
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -83,6 +98,9 @@ export const api = {
   metrics: (userId?: number) => call<BodyMetric[]>('GET', `/metrics${q(userId)}`),
   saveMetric: (m: { measured_on: string; weight_kg: number; body_fat_pct: number | null; waist_cm: number | null }) => call<{ ok: true }>('PUT', '/metrics', m),
   deleteMetric: (id: number) => call<{ ok: true }>('DELETE', `/metrics/${id}`),
+  // coach and moderator only
+  audit: (category?: AuditCategory, before?: number) =>
+    call<{ rows: AuditEntry[]; hasMore: boolean }>('GET', `/audit?limit=50${category ? `&category=${category}` : ''}${before ? `&before=${before}` : ''}`),
   // coach only
   deleteLog: (id: number) => call<{ ok: true }>('DELETE', `/logs/${id}`),
   resetPassword: (userId: number) => call<{ ok: true }>('POST', `/users/${userId}/reset-password`),

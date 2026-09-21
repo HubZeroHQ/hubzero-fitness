@@ -9,6 +9,7 @@ import Team from './pages/Team'
 import Me from './pages/Me'
 import EditProgram from './pages/EditProgram'
 import Coach from './pages/Coach'
+import Logs from './pages/Logs'
 import { ProgramProvider } from './lib/programContext'
 
 function Shell() {
@@ -43,6 +44,8 @@ function Shell() {
     ) : (
       <Today />
     ),
+    // Read-only activity log for the coach and the moderator (the server checks this too).
+    logs: profile.role === 'coach' || profile.role === 'moderator' ? <Logs /> : <Today />,
     program: profile.role === 'coach' ? <EditProgram key={programScope} initialScope={programScope} /> : <Today />,
   }[page]
 

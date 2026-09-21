@@ -1,22 +1,24 @@
 import { useAuth } from '../lib/auth'
+import type { Role } from '../lib/api'
 import { font } from './ui'
 
-export type Page = 'today' | 'progress' | 'team' | 'me' | 'coach' | 'program'
+export type Page = 'today' | 'progress' | 'team' | 'me' | 'coach' | 'logs' | 'program'
 
-const items: { id: Page; label: string; short: string; icon: string; coachOnly?: boolean }[] = [
+const items: { id: Page; label: string; short: string; icon: string; roles?: Role[] }[] = [
   { id: 'today', label: "Today's Workout", short: 'Today', icon: '⚡' },
   { id: 'progress', label: 'My Progress', short: 'Progress', icon: '📈' },
   { id: 'team', label: 'Team', short: 'Team', icon: '👥' },
   { id: 'me', label: 'Profile & BMI', short: 'Profile', icon: '👤' },
-  { id: 'coach', label: 'Coach Panel', short: 'Coach', icon: '🎯', coachOnly: true },
-  { id: 'program', label: 'Edit Program', short: 'Program', icon: '🛠️', coachOnly: true },
+  { id: 'coach', label: 'Coach Panel', short: 'Coach', icon: '🎯', roles: ['coach'] },
+  { id: 'logs', label: 'Activity Log', short: 'Logs', icon: '📜', roles: ['coach', 'moderator'] },
+  { id: 'program', label: 'Edit Program', short: 'Program', icon: '🛠️', roles: ['coach'] },
 ]
 
 const roleLabel = { coach: 'Coach', moderator: 'Moderator', member: 'Member' } as const
 
 export default function Nav({ current, onNavigate }: { current: Page; onNavigate: (p: Page) => void }) {
   const { profile, signOut } = useAuth()
-  const visible = items.filter((it) => !it.coachOnly || profile?.role === 'coach')
+  const visible = items.filter((it) => !it.roles || (profile && it.roles.includes(profile.role)))
 
   return (
     <>
