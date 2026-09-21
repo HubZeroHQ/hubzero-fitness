@@ -25,6 +25,9 @@ export interface WorkoutLog {
   user_id: number
   log_date: string
   day_number: number
+  /** The workout name/type the person actually trained (the program can change later). */
+  day_title: string | null
+  day_type: 'push' | 'pull' | 'legs' | 'rest' | null
   completed: boolean
   duration_min: number | null
   cardio_min: number | null
@@ -80,6 +83,9 @@ export const api = {
   metrics: (userId?: number) => call<BodyMetric[]>('GET', `/metrics${q(userId)}`),
   saveMetric: (m: { measured_on: string; weight_kg: number; body_fat_pct: number | null; waist_cm: number | null }) => call<{ ok: true }>('PUT', '/metrics', m),
   deleteMetric: (id: number) => call<{ ok: true }>('DELETE', `/metrics/${id}`),
+  // coach only
+  deleteLog: (id: number) => call<{ ok: true }>('DELETE', `/logs/${id}`),
+  resetPassword: (userId: number) => call<{ ok: true }>('POST', `/users/${userId}/reset-password`),
 }
 
 // ---- program (timetable) -------------------------------------------------
@@ -93,11 +99,35 @@ export interface ExerciseInput {
   timed: boolean
 }
 
+export interface ProgramScope {
+  days: ProgramDay[]
+  /** For each day number, the ids of people who have their own copy of it. */
+  overrides: Record<string, number[]>
+}
+
+export interface ApplyRequest {
+  /** The scope to copy from: 0 = team default, or a person's id. */
+  from: number
+  days: number[] | 'all'
+  /** People who receive a personal copy (0 = the team default itself). */
+  targets: number[]
+  /** Make it the team default and remove every personal copy of those days. */
+  everyone: boolean
+}
+
+type DayHeader = Pick<ProgramDay, 'type' | 'title' | 'muscles' | 'focus' | 'note'>
+
+/** `owner` is 0 for the team default, or a person's id for their own copy. */
 export const programApi = {
+  /** The program the signed-in person trains on. */
   get: () => call<ProgramDay[]>('GET', '/program'),
-  saveDay: (day: number, d: Pick<ProgramDay, 'type' | 'title' | 'muscles' | 'focus' | 'note'>) => call<ProgramDay>('PUT', `/program/days/${day}`, d),
-  addExercise: (day: number, e: ExerciseInput) => call<ProgramDay>('POST', `/program/days/${day}/exercises`, e),
+  scope: (owner: number) => call<ProgramScope>('GET', `/program/scope/${owner}`),
+  saveDay: (day: number, owner: number, d: DayHeader) => call<ProgramDay>('PUT', `/program/days/${day}`, { ...d, owner }),
+  addExercise: (day: number, owner: number, e: ExerciseInput) => call<ProgramDay>('POST', `/program/days/${day}/exercises`, { ...e, owner }),
   updateExercise: (id: number, e: Partial<ExerciseInput>) => call<ProgramDay>('PATCH', `/program/exercises/${id}`, e),
   deleteExercise: (id: number) => call<ProgramDay>('DELETE', `/program/exercises/${id}`),
   moveExercise: (id: number, direction: 'up' | 'down') => call<ProgramDay>('POST', `/program/exercises/${id}/move`, { direction }),
+  customize: (day: number, owner: number) => call<ProgramDay>('POST', `/program/days/${day}/customize`, { owner }),
+  resetDay: (day: number, owner: number) => call<{ ok: true }>('DELETE', `/program/days/${day}/customize?owner=${owner}`),
+  apply: (req: ApplyRequest) => call<{ ok: true; days: number }>('POST', '/program/apply', req),
 }

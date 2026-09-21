@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, type BodyMetric, type FullLog, type Profile } from './api'
 
 /** All workout logs (with sets) for one user, or for everyone when userId is omitted. Oldest first. */
-export function useLogs(userId?: number) {
+export function useLogs(userId?: number, reloadKey = 0) {
   const [logs, setLogs] = useState<FullLog[] | null>(null)
   useEffect(() => {
     let active = true
@@ -10,7 +10,7 @@ export function useLogs(userId?: number) {
     return () => {
       active = false
     }
-  }, [userId])
+  }, [userId, reloadKey])
   return logs
 }
 

@@ -72,6 +72,8 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
   const requireReady = (req, res, next) =>
     req.user.must_change_password ? res.status(403).json({ error: 'Change your password first' }) : next()
 
+  const requireCoach = (req, res, next) => (req.user.role === 'coach' ? next() : res.status(403).json({ error: 'Only the coach can do that' }))
+
   // ---- auth routes --------------------------------------------------------
   app.post('/api/login', (req, res) => {
     const email = String(req.body?.email ?? '').trim().toLowerCase()
@@ -161,15 +163,17 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     const day = Number(b.day_number)
     if (!Number.isInteger(day) || day < 1 || day > 7) return res.status(400).json({ error: 'Bad day' })
     const sets = Array.isArray(b.sets) ? b.sets.slice(0, 200) : []
+    // Remember which workout they actually did, since the coach can later change what a day contains.
+    const trained = effectiveProgram(req.user.id).find((d) => d.day === day)
 
     const saved = tx(db, () => {
       db.prepare(
-        `INSERT INTO workout_logs (user_id, log_date, day_number, completed, duration_min, cardio_min, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO workout_logs (user_id, log_date, day_number, day_title, day_type, completed, duration_min, cardio_min, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (user_id, log_date) DO UPDATE SET
-           day_number = excluded.day_number, completed = excluded.completed,
+           day_number = excluded.day_number, day_title = excluded.day_title, day_type = excluded.day_type, completed = excluded.completed,
            duration_min = excluded.duration_min, cardio_min = excluded.cardio_min, notes = excluded.notes`,
-      ).run(req.user.id, date, day, bool(b.completed), numOrNull(b.duration_min), numOrNull(b.cardio_min), b.notes ? String(b.notes).slice(0, 500) : null)
+      ).run(req.user.id, date, day, trained?.title ?? null, trained?.type ?? null, bool(b.completed), numOrNull(b.duration_min), numOrNull(b.cardio_min), b.notes ? String(b.notes).slice(0, 500) : null)
       const log = db.prepare('SELECT * FROM workout_logs WHERE user_id = ? AND log_date = ?').get(req.user.id, date)
       db.prepare('DELETE FROM set_logs WHERE workout_log_id = ?').run(log.id)
       const ins = db.prepare(
@@ -182,6 +186,22 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
       return { log, sets: db.prepare('SELECT * FROM set_logs WHERE workout_log_id = ?').all(log.id) }
     })
     res.json(logOut(saved.log, saved.sets))
+  })
+
+  // Coach: remove a workout log (e.g. one entered by mistake). Its sets go with it.
+  data.delete('/logs/:id', requireCoach, (req, res) => {
+    db.prepare('DELETE FROM workout_logs WHERE id = ?').run(Number(req.params.id))
+    res.json({ ok: true })
+  })
+
+  // Coach: put someone's password back to the default; they must choose a new one at next login.
+  data.post('/users/:id/reset-password', requireCoach, (req, res) => {
+    const id = Number(req.params.id)
+    if (id === req.user.id) return res.status(400).json({ error: 'Use the change-password form for your own account' })
+    const r = db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(hashPassword(DEFAULT_PASSWORD), id)
+    if (r.changes !== 1) return res.status(404).json({ error: 'No such user' })
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id)
+    res.json({ ok: true })
   })
 
   data.get('/metrics', (req, res) => {
@@ -205,25 +225,47 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
   })
 
   data.delete('/metrics/:id', (req, res) => {
-    db.prepare('DELETE FROM body_metrics WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id)
+    if (req.user.role === 'coach') db.prepare('DELETE FROM body_metrics WHERE id = ?').run(Number(req.params.id))
+    else db.prepare('DELETE FROM body_metrics WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id)
     res.json({ ok: true })
   })
 
-  // ---- program (timetable): everyone reads, only the coach edits ----------
-  const requireCoach = (req, res, next) => (req.user.role === 'coach' ? next() : res.status(403).json({ error: 'Only the coach can change the program' }))
+  // ---- program (timetable) -------------------------------------------------
+  // owner 0 is the team default. Any person can have their own copy of a day, and theirs wins over the team's.
   const TYPES = ['push', 'pull', 'legs', 'rest']
   const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
   const text = (v, max) => String(v ?? '').trim().slice(0, max)
   const int = (v) => (Number.isInteger(Number(v)) && v !== '' && v !== null ? Number(v) : NaN)
 
   const exerciseOut = (e) => ({ id: e.id, key: e.key, name: e.name, sets: e.sets, repsMin: e.reps_min, repsMax: e.reps_max, timed: !!e.timed })
+  const dayOut = (row) => ({
+    id: row.id, owner: row.owner, custom: row.owner !== 0, day: row.day, type: row.type, title: row.title, muscles: row.muscles, focus: row.focus, note: row.note,
+    exercises: db.prepare('SELECT * FROM program_exercises WHERE day_id = ? ORDER BY position').all(row.id).map(exerciseOut),
+  })
+  const dayRow = (owner, day) => db.prepare('SELECT * FROM program_days WHERE owner = ? AND day = ?').get(owner, day)
+  const userExists = (id) => id === 0 || !!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)
 
-  function readProgram() {
-    const exercises = db.prepare('SELECT * FROM program_exercises ORDER BY day, position').all()
-    return db.prepare('SELECT * FROM program_days ORDER BY day').all().map((d) => ({
-      ...d,
-      exercises: exercises.filter((e) => e.day === d.day).map(exerciseOut),
-    }))
+  /** The 7 days a person actually trains: their own copy where they have one, otherwise the team's. */
+  function effectiveProgram(userId) {
+    const mine = userId ? db.prepare('SELECT * FROM program_days WHERE owner = ?').all(userId) : []
+    return db.prepare('SELECT * FROM program_days WHERE owner = 0 ORDER BY day').all().map((t) => dayOut(mine.find((m) => m.day === t.day) ?? t))
+  }
+  const effectiveRow = (userId, day) => (userId && dayRow(userId, day)) || dayRow(0, day)
+
+  /** Overwrite (or create) owner's copy of a day with the contents of a source day row. */
+  function copyDay(src, owner) {
+    const dest = dayRow(owner, src.day)
+    let id
+    if (dest) {
+      id = dest.id
+      db.prepare('UPDATE program_days SET type = ?, title = ?, muscles = ?, focus = ?, note = ? WHERE id = ?').run(src.type, src.title, src.muscles, src.focus, src.note, id)
+      db.prepare('DELETE FROM program_exercises WHERE day_id = ?').run(id)
+    } else {
+      id = db.prepare('INSERT INTO program_days (owner, day, type, title, muscles, focus, note) VALUES (?, ?, ?, ?, ?, ?, ?)').run(owner, src.day, src.type, src.title, src.muscles, src.focus, src.note).lastInsertRowid
+    }
+    db.prepare(
+      'INSERT INTO program_exercises (day_id, position, key, name, sets, reps_min, reps_max, timed) SELECT ?, position, key, name, sets, reps_min, reps_max, timed FROM program_exercises WHERE day_id = ?',
+    ).run(id, src.id)
   }
 
   /** Validate exercise fields; returns { error } or the cleaned values. */
@@ -246,72 +288,154 @@ export function createApp(db, { secureCookie = false, trustProxy = false, static
     return out
   }
 
-  app.get('/api/program', requireAuth, requireReady, (_req, res) => res.json(readProgram()))
+  // Everyone reads the program they train on (their own copy of a day if the coach made one, else the team's).
+  app.get('/api/program', requireAuth, requireReady, (req, res) => res.json(effectiveProgram(req.user.id)))
 
   const program = express.Router()
   program.use(requireAuth, requireReady, requireCoach)
 
-  program.put('/days/:day', (req, res) => {
+  // The editor's view of one scope: owner 0 = team default, otherwise that person's effective program.
+  program.get('/scope/:owner', (req, res) => {
+    const owner = int(req.params.owner)
+    if (!(owner >= 0) || !userExists(owner)) return res.status(404).json({ error: 'No such person' })
+    const overrides = {}
+    for (const r of db.prepare('SELECT day, owner FROM program_days WHERE owner != 0 ORDER BY day, owner').all()) (overrides[r.day] ??= []).push(r.owner)
+    res.json({ days: effectiveProgram(owner), overrides })
+  })
+
+  // Edits act on a specific person's own copy; you cannot edit an inherited day without customising it first,
+  // so a change meant for one person can never leak into the team default (or the other way round).
+  function targetRow(req, res) {
     const day = Number(req.params.day)
+    const owner = int(req.body?.owner ?? 0)
+    if (!(owner >= 0) || !userExists(owner)) return void res.status(404).json({ error: 'No such person' })
+    if (!Number.isInteger(day) || day < 1 || day > 7) return void res.status(404).json({ error: 'No such day' })
+    const row = dayRow(owner, day)
+    if (!row) return void res.status(409).json({ error: 'Customise this day for that person first' })
+    return row
+  }
+
+  program.put('/days/:day', (req, res) => {
+    const row = targetRow(req, res)
+    if (!row) return
     const b = req.body ?? {}
-    if (!db.prepare('SELECT 1 FROM program_days WHERE day = ?').get(day)) return res.status(404).json({ error: 'No such day' })
     if (!TYPES.includes(b.type)) return res.status(400).json({ error: 'Bad day type' })
     const title = text(b.title, 40)
     if (!title) return res.status(400).json({ error: 'Day needs a title' })
-    db.prepare('UPDATE program_days SET type = ?, title = ?, muscles = ?, focus = ?, note = ? WHERE day = ?').run(b.type, title, text(b.muscles, 80), text(b.focus, 80), text(b.note, 160), day)
-    res.json(readProgram().find((d) => d.day === day))
+    db.prepare('UPDATE program_days SET type = ?, title = ?, muscles = ?, focus = ?, note = ? WHERE id = ?').run(b.type, title, text(b.muscles, 80), text(b.focus, 80), text(b.note, 160), row.id)
+    res.json(dayOut(db.prepare('SELECT * FROM program_days WHERE id = ?').get(row.id)))
   })
 
   program.post('/days/:day/exercises', (req, res) => {
-    const day = Number(req.params.day)
-    if (!db.prepare('SELECT 1 FROM program_days WHERE day = ?').get(day)) return res.status(404).json({ error: 'No such day' })
+    const row = targetRow(req, res)
+    if (!row) return
     const c = cleanExercise(req.body ?? {})
     if (c.error) return res.status(400).json({ error: c.error })
     if (c.repsMin > c.repsMax) return res.status(400).json({ error: 'Min reps cannot be above max reps' })
     const key = slug(c.name) || `exercise-${Date.now()}`
-    if (db.prepare('SELECT 1 FROM program_exercises WHERE day = ? AND key = ?').get(day, key)) return res.status(409).json({ error: 'That exercise is already on this day' })
-    const pos = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM program_exercises WHERE day = ?').get(day).p
-    db.prepare('INSERT INTO program_exercises (day, position, key, name, sets, reps_min, reps_max, timed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(day, pos, key, c.name, c.sets, c.repsMin, c.repsMax, c.timed ? 1 : 0)
-    res.status(201).json(readProgram().find((d) => d.day === day))
+    if (db.prepare('SELECT 1 FROM program_exercises WHERE day_id = ? AND key = ?').get(row.id, key)) return res.status(409).json({ error: 'That exercise is already on this day' })
+    const pos = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM program_exercises WHERE day_id = ?').get(row.id).p
+    db.prepare('INSERT INTO program_exercises (day_id, position, key, name, sets, reps_min, reps_max, timed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(row.id, pos, key, c.name, c.sets, c.repsMin, c.repsMax, c.timed ? 1 : 0)
+    res.status(201).json(dayOut(row))
   })
 
-  program.patch('/exercises/:id', (req, res) => {
-    const id = Number(req.params.id)
+  const exerciseAndDay = (id) => {
     const cur = db.prepare('SELECT * FROM program_exercises WHERE id = ?').get(id)
-    if (!cur) return res.status(404).json({ error: 'No such exercise' })
+    return cur && { cur, row: db.prepare('SELECT * FROM program_days WHERE id = ?').get(cur.day_id) }
+  }
+
+  program.patch('/exercises/:id', (req, res) => {
+    const found = exerciseAndDay(Number(req.params.id))
+    if (!found) return res.status(404).json({ error: 'No such exercise' })
+    const { cur, row } = found
     const c = cleanExercise(req.body ?? {}, true)
     if (c.error) return res.status(400).json({ error: c.error })
     const next = { name: c.name ?? cur.name, sets: c.sets ?? cur.sets, repsMin: c.repsMin ?? cur.reps_min, repsMax: c.repsMax ?? cur.reps_max, timed: c.timed ?? !!cur.timed }
     if (next.repsMin > next.repsMax) return res.status(400).json({ error: 'Min reps cannot be above max reps' })
     // The key stays the same on rename so past logs and personal records stay linked to this exercise.
-    db.prepare('UPDATE program_exercises SET name = ?, sets = ?, reps_min = ?, reps_max = ?, timed = ? WHERE id = ?').run(next.name, next.sets, next.repsMin, next.repsMax, next.timed ? 1 : 0, id)
-    res.json(readProgram().find((d) => d.day === cur.day))
+    db.prepare('UPDATE program_exercises SET name = ?, sets = ?, reps_min = ?, reps_max = ?, timed = ? WHERE id = ?').run(next.name, next.sets, next.repsMin, next.repsMax, next.timed ? 1 : 0, cur.id)
+    res.json(dayOut(row))
   })
 
   program.delete('/exercises/:id', (req, res) => {
-    const id = Number(req.params.id)
-    const cur = db.prepare('SELECT * FROM program_exercises WHERE id = ?').get(id)
-    if (!cur) return res.status(404).json({ error: 'No such exercise' })
+    const found = exerciseAndDay(Number(req.params.id))
+    if (!found) return res.status(404).json({ error: 'No such exercise' })
+    const { cur, row } = found
     tx(db, () => {
-      db.prepare('DELETE FROM program_exercises WHERE id = ?').run(id)
-      db.prepare('UPDATE program_exercises SET position = position - 1 WHERE day = ? AND position > ?').run(cur.day, cur.position)
+      db.prepare('DELETE FROM program_exercises WHERE id = ?').run(cur.id)
+      db.prepare('UPDATE program_exercises SET position = position - 1 WHERE day_id = ? AND position > ?').run(cur.day_id, cur.position)
     })
-    res.json(readProgram().find((d) => d.day === cur.day))
+    res.json(dayOut(row))
   })
 
   program.post('/exercises/:id/move', (req, res) => {
-    const id = Number(req.params.id)
-    const cur = db.prepare('SELECT * FROM program_exercises WHERE id = ?').get(id)
-    if (!cur) return res.status(404).json({ error: 'No such exercise' })
+    const found = exerciseAndDay(Number(req.params.id))
+    if (!found) return res.status(404).json({ error: 'No such exercise' })
+    const { cur, row } = found
     const target = cur.position + (req.body?.direction === 'up' ? -1 : 1)
-    const other = db.prepare('SELECT * FROM program_exercises WHERE day = ? AND position = ?').get(cur.day, target)
+    const other = db.prepare('SELECT * FROM program_exercises WHERE day_id = ? AND position = ?').get(cur.day_id, target)
     if (other) {
       tx(db, () => {
         db.prepare('UPDATE program_exercises SET position = ? WHERE id = ?').run(target, cur.id)
         db.prepare('UPDATE program_exercises SET position = ? WHERE id = ?').run(cur.position, other.id)
       })
     }
-    res.json(readProgram().find((d) => d.day === cur.day))
+    res.json(dayOut(row))
+  })
+
+  // Give one person their own copy of a team day (a starting point they can then change).
+  program.post('/days/:day/customize', (req, res) => {
+    const day = Number(req.params.day)
+    const owner = int(req.body?.owner)
+    if (!(owner > 0) || !userExists(owner)) return res.status(404).json({ error: 'No such person' })
+    const team = Number.isInteger(day) ? dayRow(0, day) : null
+    if (!team) return res.status(404).json({ error: 'No such day' })
+    if (dayRow(owner, day)) return res.status(409).json({ error: 'Already customised' })
+    tx(db, () => copyDay(team, owner))
+    res.status(201).json(dayOut(dayRow(owner, day)))
+  })
+
+  // Take a person back to the team's version of a day (their personal copy is deleted).
+  program.delete('/days/:day/customize', (req, res) => {
+    const day = Number(req.params.day)
+    const owner = int(req.query.owner)
+    if (!(owner > 0)) return res.status(400).json({ error: 'Choose a person' })
+    db.prepare('DELETE FROM program_days WHERE owner = ? AND day = ?').run(owner, day)
+    res.json({ ok: true })
+  })
+
+  // Apply a day (or the whole week) from one scope to several people at once.
+  //   from: the scope to copy from (0 = team default, or a person's id), days: [1..7] or 'all',
+  //   targets: person ids to receive personal copies (0 = the team default), everyone: make it the team default AND
+  //   remove every personal copy of those days, so all members follow it.
+  program.post('/apply', (req, res) => {
+    const b = req.body ?? {}
+    const from = int(b.from ?? 0)
+    if (!(from >= 0) || !userExists(from)) return res.status(400).json({ error: 'Unknown source' })
+    const days = b.days === 'all' ? [1, 2, 3, 4, 5, 6, 7] : [...new Set(Array.isArray(b.days) ? b.days.map(Number) : [])]
+    if (days.length === 0 || days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) return res.status(400).json({ error: 'Choose which days to apply' })
+    const targets = [...new Set(Array.isArray(b.targets) ? b.targets.map(int) : [])]
+    if (targets.some((t) => !(t >= 0) || !userExists(t))) return res.status(400).json({ error: 'Unknown person' })
+    const everyone = !!b.everyone
+    if (!everyone && targets.length === 0) return res.status(400).json({ error: 'Choose who to apply it to' })
+
+    tx(db, () => {
+      for (const d of days) {
+        const src = effectiveRow(from, d)
+        if (everyone) {
+          if (src.owner !== 0) copyDay(src, 0)
+          db.prepare('DELETE FROM program_days WHERE owner != 0 AND day = ?').run(d)
+        }
+        for (const t of targets) {
+          if (t === from) continue
+          if (everyone && t !== 0) continue // already follows the team version
+          const source = effectiveRow(from, d)
+          if (!source || source.owner === t) continue
+          copyDay(source, t)
+        }
+      }
+    })
+    res.json({ ok: true, days: days.length })
   })
 
   app.use('/api/program', program)

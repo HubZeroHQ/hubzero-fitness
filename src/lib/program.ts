@@ -11,6 +11,12 @@ export interface Exercise {
 }
 
 export interface ProgramDay {
+  /** Database id of this day row. */
+  id: number
+  /** 0 = the team default, otherwise the person whose own copy this is. */
+  owner: number
+  /** True when this is a personal copy rather than the team default. */
+  custom: boolean
   day: number
   type: DayType
   title: string

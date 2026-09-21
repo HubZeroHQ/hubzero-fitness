@@ -1,13 +1,14 @@
 import { useAuth } from '../lib/auth'
 import { font } from './ui'
 
-export type Page = 'today' | 'progress' | 'team' | 'me' | 'program'
+export type Page = 'today' | 'progress' | 'team' | 'me' | 'coach' | 'program'
 
 const items: { id: Page; label: string; short: string; icon: string; coachOnly?: boolean }[] = [
   { id: 'today', label: "Today's Workout", short: 'Today', icon: '⚡' },
   { id: 'progress', label: 'My Progress', short: 'Progress', icon: '📈' },
   { id: 'team', label: 'Team', short: 'Team', icon: '👥' },
   { id: 'me', label: 'Profile & BMI', short: 'Profile', icon: '👤' },
+  { id: 'coach', label: 'Coach Panel', short: 'Coach', icon: '🎯', coachOnly: true },
   { id: 'program', label: 'Edit Program', short: 'Program', icon: '🛠️', coachOnly: true },
 ]
 

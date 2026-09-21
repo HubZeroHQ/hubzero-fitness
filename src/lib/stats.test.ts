@@ -14,7 +14,7 @@ const set = (over: Partial<SetLog> = {}): SetLog => ({
 })
 
 const log = (date: string, completed = true): WorkoutLog => ({
-  id: 1, user_id: 1, log_date: date, day_number: 1, completed, duration_min: null, cardio_min: null, notes: null,
+  id: 1, user_id: 1, log_date: date, day_number: 1, day_title: null, day_type: null, completed, duration_min: null, cardio_min: null, notes: null,
 })
 
 describe('dates', () => {

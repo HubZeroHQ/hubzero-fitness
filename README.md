@@ -7,7 +7,11 @@ Push / Pull / Legs+Core timetable and saves progress after every workout.
 - **My progress**: streak, weekly count, volume, personal records, charts, history.
 - **Team**: ranking of all members. Everyone can see everyone's numbers.
 - **Profile & BMI**: BMI (Asia-Pacific and WHO), healthy range, calories, body-fat estimate, weigh-in log.
-- **Edit Program** (coach only): add, change, reorder and remove exercises, and edit each day's title, type and notes.
+- **Coach Panel** (coach only): every member's status at a glance (trained today, last workout, streak, weight,
+  who needs a nudge), a team activity feed, and the coach's controls: open anyone's full progress, edit their
+  program, reset their password, delete a workout entered by mistake.
+- **Edit Program** (coach only): change the team's program, or give any one person their own version. Add, edit,
+  reorder and remove exercises, and copy a day (or the whole week) to chosen people or to everyone at once.
 
 Stack: React 19 + Vite + Tailwind 4 (frontend), Node + Express + SQLite (backend, one process, one database file).
 There is **no external service, cloud account or paid dependency**.
@@ -120,8 +124,10 @@ pnpm admin add-user new@example.com "Full Name" member      # role: coach | mode
 pnpm admin set-role someone@example.com coach
 ```
 
-Permissions: the **coach** can edit the workout program; **moderator** and **member** have the same access
-(their own data is editable only by themselves; everyone can read everyone's progress).
+Permissions: the **coach** controls the workout programs (team and personal), can reset members' passwords and delete
+workouts or weigh-ins; **moderator** and **member** have the same access (their own data is editable only by
+themselves; everyone can read everyone's progress). The coach can also reset passwords inside the app
+(Coach Panel), so the command line is only needed if the coach is locked out.
 
 ## Data and backups
 
@@ -135,7 +141,8 @@ sqlite3 data/fitness.db ".backup 'backup-$(date +%F).db'"
 or stop the server and copy the file. To restore, stop the server and put the file back. `data/` is git-ignored.
 
 Tables: `users`, `sessions`, `workout_logs` (one per person per day), `set_logs` (one per set),
-`body_metrics` (weigh-ins), `program_days` and `program_exercises` (the editable timetable). The schema is at the top of `server/db.js`.
+`body_metrics` (weigh-ins), `program_days` and `program_exercises` (the editable timetable: `owner` 0 is the team
+default, any other owner is that person's own copy of a day). The schema is at the top of `server/db.js`.
 
 ### Using MySQL instead
 
@@ -148,27 +155,44 @@ lines): swap `node:sqlite` for the `mysql2` package, change `INTEGER PRIMARY KEY
 ## Changing the timetable (coach)
 
 The timetable lives in the database. The first start loads the Hub Zero timetable image's program from
-`server/program.seed.js`; after that the coach changes it inside the app under **Edit Program**:
+`server/program.seed.js`; after that the coach changes it inside the app under **Edit Program**.
 
-- Pick a day (1 to 7) and edit its type (Push / Pull / Legs / Rest, sets the colour), title, muscles, focus and note.
-- Edit an exercise's name, sets and rep range (or seconds for timed ones like planks), then press **Save**.
-- Reorder with the arrows, **Remove** an exercise, or **Add** a new one at the end of the day.
+**Whose program?** Pick a scope at the top:
 
-Changes apply to everyone immediately. Past workouts, personal records and charts are never deleted: each logged set
-stores the exercise name and a stable key, and renaming an exercise keeps its key so its history stays linked.
-There are always 7 days (a day can be turned into a rest day by setting its type to Rest and removing its exercises).
-To reset the program to the original timetable, stop the server and run
+- **Everyone (team default)**: the program every member follows unless the coach gave them their own version of a day.
+- **One person**: that person's program. Days they follow from the team are read-only until you press
+  **Customise Day N for <name>**, which gives them their own copy to change. **Reset** takes them back to the team
+  version. Because personal and team versions are separate, nothing you change for one person can leak to anyone else.
+  A dot on a day tab (and "N custom" on a person) shows where personal versions exist.
+
+**Editing**: pick a day (1 to 7); change its type (Push / Pull / Legs / Rest, sets the colour), title, muscles, focus
+and note; edit an exercise's name, sets and rep range (or seconds for timed ones like planks) and press **Save**;
+reorder with the arrows, **Remove**, or **Add** an exercise at the end of the day.
+
+**Apply this to other people** (bottom of the page): copy what you are looking at, either **Day N only** or the
+**Whole program (all 7 days)**, to any combination of people (each gets their own copy), or tick **Everyone at once**:
+it becomes the team default and every personal version of those days is removed, so all members follow it.
+You are asked to confirm before anything is overwritten.
+
+Changes apply immediately. Past workouts, personal records and charts are never deleted: each logged set stores the
+exercise name and a stable key (renaming an exercise keeps its key), and each workout remembers the day name it was
+done under, so history reads correctly even after the program changes. There are always 7 days (turn a day into a rest
+day by setting its type to Rest and removing its exercises). To reset the whole program to the original timetable,
+stop the server and run
 `sqlite3 data/fitness.db "DELETE FROM program_exercises; DELETE FROM program_days;"`, then start it again.
 
 Day mapping: Monday is Day 1 through Saturday Day 6, Sunday is Day 7; members can switch day on the page
 (`defaultDayFor` in `src/lib/program.ts`).
+
+Databases created before personal programs existed are upgraded automatically on the next start (the existing team
+program, its exercises and all history are kept).
 
 ## Project layout
 
 ```
 server/        Express API + SQLite (db.js schema/seed, program.seed.js, app.js routes, admin.js CLI, app.test.js tests)
 src/lib/       api client, auth + program context, BMI/health maths, stats
-src/pages/     Login, ChangePassword, Today, Progress, Team, Me, EditProgram (coach)
+src/pages/     Login, ChangePassword, Today, Progress, Team, Me, Coach + EditProgram (coach only)
 src/components Nav and shared UI
 data/          SQLite database (created on first run, not in git)
 ```
@@ -176,19 +200,22 @@ data/          SQLite database (created on first run, not in git)
 ## Tests
 
 ```bash
-pnpm test          # backend API tests + unit tests (fast, ~10 s)
-pnpm test:e2e      # builds the site and drives it in a real Chrome (about 1 minute)
+pnpm test          # backend API tests + unit tests (fast, ~15 s)
+pnpm test:e2e      # builds the site and drives it in a real Chrome (about 2 minutes)
 pnpm test:all      # everything
 ```
 
-- **Backend** (`server/app.test.js`, `server/edge.test.js`, 23 tests): login, forced password change, session
-  handling, password hashing, cookie flags, every route rejecting signed-out users, input validation, workout and
-  weigh-in saving, coach-only program editing, login lockout, the admin CLI, and idempotent database start-up.
+- **Backend** (`server/*.test.js`, 37 tests): login, forced password change, session handling, password hashing,
+  cookie flags, every route rejecting signed-out users, input validation, workout and weigh-in saving, coach-only
+  actions, personal programs (customise, edit, reset, apply to some people or everyone, day name snapshots),
+  password reset and deletions by the coach, login lockout, the admin CLI, and the migration of an older database.
 - **Unit** (`src/lib/*.test.ts`, 40 tests): BMI and categories (WHO and Asia-Pacific), healthy range, BMR, age,
   body fat, estimated 1RM, streaks, personal records, volume and date helpers.
-- **End-to-end** (`tests/e2e/app.spec.ts`, 24 tests): the real production build in Chrome on a throwaway database,
-  covering first login and password change, logging and finishing a workout, progress, team, BMI and weigh-ins,
-  role restrictions, the coach editing the program while a member watches, and the phone layout.
+- **End-to-end** (`tests/e2e/*.spec.ts`, 37 tests): the real production build in Chrome on a throwaway database:
+  first login and password change, logging and finishing a workout, progress, team, BMI and weigh-ins, role
+  restrictions, the coach editing the team program and personal programs while members watch, applying programs to
+  people or everyone, the Coach Panel (status, opening a set-by-set history, deleting a workout, resetting a
+  password), and the phone layout for members and the coach.
 
 The end-to-end tests use the Chrome already installed on the machine (no browser download) and always start from an
 empty database, so they never touch real data.

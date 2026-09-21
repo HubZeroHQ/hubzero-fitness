@@ -5,8 +5,6 @@ import type { ProgramDay } from './program'
 interface ProgramState {
   days: ProgramDay[]
   dayByNumber: (n: number) => ProgramDay
-  /** Replace one day after the coach edits it. */
-  replaceDay: (d: ProgramDay) => void
   reload: () => Promise<void>
 }
 
@@ -41,7 +39,6 @@ export function ProgramProvider({ children }: { children: ReactNode }) {
   const value: ProgramState = {
     days,
     dayByNumber: (n) => days.find((d) => d.day === n) ?? days[0],
-    replaceDay: (d) => setDays((cur) => cur!.map((x) => (x.day === d.day ? d : x))),
     reload,
   }
   return <ProgramContext.Provider value={value}>{children}</ProgramContext.Provider>

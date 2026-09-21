@@ -82,7 +82,7 @@ export default function Team() {
                       {r.lastLog && (
                         <>
                           {' · last: '}
-                          <span style={{ color: TYPE_COLOR[dayByNumber(r.lastLog.day_number).type].fg }}>{dayByNumber(r.lastLog.day_number).title}</span> on {fmtDate(r.lastLog.log_date)}
+                          <span style={{ color: TYPE_COLOR[r.lastLog.day_type ?? dayByNumber(r.lastLog.day_number).type].fg }}>{r.lastLog.day_title ?? dayByNumber(r.lastLog.day_number).title}</span> on {fmtDate(r.lastLog.log_date)}
                         </>
                       )}
                     </div>

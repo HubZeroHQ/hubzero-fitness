@@ -15,7 +15,7 @@
     "admin": "node server/admin.js",
     "test": "pnpm test:server && pnpm test:unit",
     "format": "oxfmt",
-    "test:server": "node --test server/app.test.js server/edge.test.js",
+    "test:server": "node --test server/app.test.js server/edge.test.js server/coach.test.js",
     "test:unit": "vitest run",
     "test:e2e": "vite build && playwright test",
     "test:all": "pnpm test && pnpm test:e2e"

@@ -8,11 +8,14 @@ import Progress from './pages/Progress'
 import Team from './pages/Team'
 import Me from './pages/Me'
 import EditProgram from './pages/EditProgram'
+import Coach from './pages/Coach'
 import { ProgramProvider } from './lib/programContext'
 
 function Shell() {
   const { profile, loading } = useAuth()
   const [page, setPage] = useState<Page>('today')
+  // Which person's program the editor opens on (0 = the team default); set by the Coach Panel's shortcut.
+  const [programScope, setProgramScope] = useState(0)
 
   if (loading) {
     return (
@@ -30,13 +33,29 @@ function Shell() {
     team: <Team />,
     me: <Me />,
     // Also enforced on the server; this just hides the page from non-coaches.
-    program: profile.role === 'coach' ? <EditProgram /> : <Today />,
+    coach: profile.role === 'coach' ? (
+      <Coach
+        onEditProgram={(id) => {
+          setProgramScope(id)
+          setPage('program')
+        }}
+      />
+    ) : (
+      <Today />
+    ),
+    program: profile.role === 'coach' ? <EditProgram key={programScope} initialScope={programScope} /> : <Today />,
   }[page]
 
   return (
     <ProgramProvider>
       <div className="min-h-screen" style={{ background: '#0a0a0c' }}>
-        <Nav current={page} onNavigate={setPage} />
+        <Nav
+          current={page}
+          onNavigate={(p) => {
+            if (p === 'program') setProgramScope(0)
+            setPage(p)
+          }}
+        />
         <main className="md:pl-56 pb-24 md:pb-8">
           <div className="max-w-5xl mx-auto px-4 md:px-8 py-6">{content}</div>
         </main>

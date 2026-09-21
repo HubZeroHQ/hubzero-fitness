@@ -33,6 +33,17 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
   const file = resolve(path)
   if (path !== ':memory:') mkdirSync(dirname(file), { recursive: true })
   const db = new DatabaseSync(path === ':memory:' ? path : file)
+
+  // Older databases had a single team program; set those tables aside, create the new layout, then copy across.
+  const cols = (table) => db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all().map((c) => c.name)
+  const legacyProgram = cols('program_days').length > 0 && !cols('program_days').includes('owner')
+  if (legacyProgram) {
+    db.exec('PRAGMA foreign_keys = OFF')
+    tx(db, () => {
+      db.exec('ALTER TABLE program_exercises RENAME TO program_exercises_old; ALTER TABLE program_days RENAME TO program_days_old;')
+    })
+  }
+
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
@@ -62,6 +73,8 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       log_date TEXT NOT NULL,
       day_number INTEGER NOT NULL CHECK (day_number BETWEEN 1 AND 7),
+      day_title TEXT,
+      day_type TEXT,
       completed INTEGER NOT NULL DEFAULT 0,
       duration_min INTEGER,
       cardio_min INTEGER,
@@ -92,19 +105,22 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
       UNIQUE (user_id, measured_on)
     );
 
-    -- The editable timetable: 7 fixed days, each with an ordered list of exercises.
+    -- The editable timetable. owner 0 is the team default; owner = a user id is that person's own copy of a day.
     CREATE TABLE IF NOT EXISTS program_days (
-      day INTEGER PRIMARY KEY CHECK (day BETWEEN 1 AND 7),
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner INTEGER NOT NULL DEFAULT 0,
+      day INTEGER NOT NULL CHECK (day BETWEEN 1 AND 7),
       type TEXT NOT NULL CHECK (type IN ('push','pull','legs','rest')),
       title TEXT NOT NULL,
       muscles TEXT NOT NULL DEFAULT '',
       focus TEXT NOT NULL DEFAULT '',
-      note TEXT NOT NULL DEFAULT ''
+      note TEXT NOT NULL DEFAULT '',
+      UNIQUE (owner, day)
     );
 
     CREATE TABLE IF NOT EXISTS program_exercises (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      day INTEGER NOT NULL REFERENCES program_days(day) ON DELETE CASCADE,
+      day_id INTEGER NOT NULL REFERENCES program_days(id) ON DELETE CASCADE,
       position INTEGER NOT NULL,
       key TEXT NOT NULL,
       name TEXT NOT NULL,
@@ -112,13 +128,31 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
       reps_min INTEGER NOT NULL,
       reps_max INTEGER NOT NULL,
       timed INTEGER NOT NULL DEFAULT 0,
-      UNIQUE (day, key)
+      UNIQUE (day_id, key)
     );
 
     CREATE INDEX IF NOT EXISTS idx_logs_user_date ON workout_logs (user_id, log_date);
     CREATE INDEX IF NOT EXISTS idx_sets_log ON set_logs (workout_log_id);
     CREATE INDEX IF NOT EXISTS idx_metrics_user ON body_metrics (user_id, measured_on);
   `)
+
+  if (legacyProgram) {
+    tx(db, () => {
+      db.exec(`
+        INSERT INTO program_days (owner, day, type, title, muscles, focus, note)
+          SELECT 0, day, type, title, muscles, focus, note FROM program_days_old;
+        INSERT INTO program_exercises (id, day_id, position, key, name, sets, reps_min, reps_max, timed)
+          SELECT e.id, d.id, e.position, e.key, e.name, e.sets, e.reps_min, e.reps_max, e.timed
+          FROM program_exercises_old e JOIN program_days d ON d.owner = 0 AND d.day = e.day;
+        DROP TABLE program_exercises_old;
+        DROP TABLE program_days_old;
+      `)
+    })
+  }
+  // Databases created before day titles were remembered on each workout.
+  if (!cols('workout_logs').includes('day_title')) {
+    db.exec('ALTER TABLE workout_logs ADD COLUMN day_title TEXT; ALTER TABLE workout_logs ADD COLUMN day_type TEXT;')
+  }
 
   // First run: create the roster with the default password (everyone must change it on first login).
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM users').get()
@@ -127,13 +161,13 @@ export function openDb(path = process.env.DB_PATH || './data/fitness.db') {
     for (const u of ROSTER) insert.run(u.email, hashPassword(DEFAULT_PASSWORD), u.full_name, u.role)
   }
   // First run (or an older database without a program): load the initial timetable.
-  const days = db.prepare('SELECT COUNT(*) AS n FROM program_days').get().n
+  const days = db.prepare('SELECT COUNT(*) AS n FROM program_days WHERE owner = 0').get().n
   if (days === 0) {
-    const insDay = db.prepare('INSERT INTO program_days (day, type, title, muscles, focus, note) VALUES (?, ?, ?, ?, ?, ?)')
-    const insEx = db.prepare('INSERT INTO program_exercises (day, position, key, name, sets, reps_min, reps_max, timed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    const insDay = db.prepare('INSERT INTO program_days (owner, day, type, title, muscles, focus, note) VALUES (0, ?, ?, ?, ?, ?, ?)')
+    const insEx = db.prepare('INSERT INTO program_exercises (day_id, position, key, name, sets, reps_min, reps_max, timed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     for (const d of PROGRAM_SEED) {
-      insDay.run(d.day, d.type, d.title, d.muscles, d.focus, d.note)
-      d.exercises.forEach((e, i) => insEx.run(d.day, i + 1, e.key, e.name, e.sets, e.repsMin, e.repsMax, e.timed ? 1 : 0))
+      const dayId = insDay.run(d.day, d.type, d.title, d.muscles, d.focus, d.note).lastInsertRowid
+      d.exercises.forEach((e, i) => insEx.run(dayId, i + 1, e.key, e.name, e.sets, e.repsMin, e.repsMax, e.timed ? 1 : 0))
     }
   }
   return db
